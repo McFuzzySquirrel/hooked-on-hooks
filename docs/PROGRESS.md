@@ -4,10 +4,10 @@
 
 **Mode**: Feature-Based Build  
 **Product Vision**: docs/product-vision.md  
-**Status**: Complete  
+**Status**: Complete (MVP + post-MVP enhancements)  
 **Last Updated**: 2026-04-17
 
-All five planned features are complete and validated locally. Integration tooling (bootstrap/unbootstrap) has been added post-MVP. Live board UI polish has been applied. Tracing v2 (event-stream correlation) is complete across schema, emitter, ingest, UI, and documentation.
+All five planned MVP features are complete and validated locally. Post-MVP work includes integration tooling (bootstrap/unbootstrap), live board UI polish, tracing v2 (event-stream correlation), and operator UX/learning-surface updates captured in the dedicated post-MVP feature document.
 
 ## Tracing v2: Event-Stream Correlation (Post-MVP)
 
@@ -167,6 +167,7 @@ Coverage: lines ≥80% (all thresholds pass)
 | Live Visualization Board | docs/features/live-visualization-board.md | Complete | Implemented and validated locally |
 | Replay and Session Review | docs/features/replay-and-session-review.md | Complete | Implemented and validated locally |
 | Tracing v2 (Event-Stream Correlation) | docs/roadmap/tracing-plan.md | Complete | Phase A+B complete; Phase C (optional SQLite) deferred |
+| Post-MVP Operator UX and Learning Surface | docs/features/post-mvp-operator-ux-and-learning-surface.md | Complete | Documents post-MVP UI, replay, docs, and tutorial refinements |
 
 ## Completed Work: Feature 5 (RPLY)
 
@@ -439,7 +440,7 @@ FND ✓
 
 ## Next Start Point
 
-The planned MVP feature build is complete. No remaining pending feature work is tracked in this plan.
+The planned MVP feature build is complete, and post-MVP improvements are now documented. No remaining pending feature work is tracked in this plan.
 
 ## Blockers
 
