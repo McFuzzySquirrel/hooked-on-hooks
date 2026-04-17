@@ -16,8 +16,58 @@ const CSV_COLUMNS = [
   "traceId",
   "spanId",
   "parentSpanId",
+  "toolName",
+  "toolCallId",
+  "agentName",
+  "status",
+  "notificationType",
+  "durationMs",
+  "errorSummary",
+  "taskDescription",
   "payload",
 ] as const;
+
+type CsvColumn = (typeof CSV_COLUMNS)[number];
+type PayloadColumn =
+  | "toolName"
+  | "toolCallId"
+  | "agentName"
+  | "status"
+  | "notificationType"
+  | "durationMs"
+  | "errorSummary"
+  | "taskDescription";
+
+function isPayloadColumn(column: CsvColumn): column is PayloadColumn {
+  return (
+    column === "toolName" ||
+    column === "toolCallId" ||
+    column === "agentName" ||
+    column === "status" ||
+    column === "notificationType" ||
+    column === "durationMs" ||
+    column === "errorSummary" ||
+    column === "taskDescription"
+  );
+}
+
+function getPayloadValue(event: EventEnvelope, key: PayloadColumn): unknown {
+  const payload = event.payload as unknown;
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  return (payload as Record<string, unknown>)[key];
+}
+
+function toCsvCellValue(value: unknown): string {
+  if (value === undefined || value === null) {
+    return "";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
 
 /**
  * Escape a value for inclusion in a CSV cell.
@@ -39,11 +89,11 @@ export function eventToCsvRow(event: EventEnvelope): string {
     if (col === "payload") {
       return escapeCsvValue(JSON.stringify(event.payload));
     }
-    const raw = (event as Record<string, unknown>)[col];
-    if (raw === undefined || raw === null) {
-      return "";
+    if (isPayloadColumn(col)) {
+      return escapeCsvValue(toCsvCellValue(getPayloadValue(event, col)));
     }
-    return escapeCsvValue(String(raw));
+    const raw = (event as Record<string, unknown>)[col];
+    return escapeCsvValue(toCsvCellValue(raw));
   });
   return values.join(",");
 }
