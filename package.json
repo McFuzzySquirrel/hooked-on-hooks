@@ -1,0 +1,34 @@
+{
+  "name": "hooked-on-hooks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "shared/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run -ws build",
+    "typecheck": "npm run -ws typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "smoke:e2e": "tsx scripts/smoke-e2e.ts",
+    "serve:ingest": "tsx -e \"import { createIngestServer } from './packages/ingest-service/src/index.ts'; (async () => { const s = await createIngestServer(); await s.listen({ host: '127.0.0.1', port: 7070 }); console.log('INGEST_READY http://127.0.0.1:7070'); })();\"",
+    "emit:event": "tsx scripts/emit-event-cli.ts",
+    "bootstrap:repo": "tsx scripts/bootstrap-existing-repo.ts",
+    "unbootstrap:repo": "tsx scripts/unbootstrap-existing-repo.ts",
+    "replay:jsonl": "tsx scripts/replay-jsonl.ts",
+    "lint": "echo 'Lint config baseline in place'",
+    "clean": "rm -rf coverage dist .tmp"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-v8": "^4.1.4",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "vitest": "^4.0.2"
+  }
+}

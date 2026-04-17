@@ -1,0 +1,35 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - heading "Copilot Activity Visualiser" [level=1] [ref=e5]
+    - status [ref=e7]: Connected
+  - region "Tool pairing diagnostics" [ref=e10]:
+    - generic [ref=e11]: Tool Pairing
+    - 'generic "Pairs: 13. Total matched tool calls. All preToolUse to postToolUse pairs found across the current session data, regardless of whether they matched exactly or by fallback heuristic." [ref=e12]':
+      - generic [ref=e13]: "Pairs:"
+      - text: "13"
+    - 'generic "by ID: 2. Exact match by toolCallId. Highest-confidence pairing. The preToolUse and postToolUse events carried the same toolCallId in their payloads, so no heuristic was needed." [ref=e14]':
+      - generic [ref=e15]: "by ID:"
+      - text: "2"
+    - 'generic "by Span: 1. Exact match by spanId. Second-tier exact pairing. No toolCallId was available, but both events carried the same spanId in the envelope, so the pair was still correlated precisely." [ref=e16]':
+      - generic [ref=e17]: "by Span:"
+      - text: "1"
+    - 'generic "Heuristic: 10. Fallback FIFO heuristic. Lowest-confidence pairing. No exact toolCallId or spanId match was available, so the ingest service paired events by tool name and arrival order." [ref=e18]':
+      - generic [ref=e19]: "Heuristic:"
+      - text: "10"
+    - 'generic "Unmatched: 1. Events without a matching pair. These preToolUse or postToolUse events could not be paired at all. This usually indicates missing end events, incomplete metadata, or out-of-order input." [ref=e430]':
+      - generic [ref=e431]: "Unmatched:"
+      - text: "1"
+  - generic [ref=e20]:
+    - heading "Timeline" [level=2] [ref=e21]
+    - region "Gantt chart" [ref=e22]:
+      - generic [ref=e23]
+      - generic "Gantt chart legend" [ref=e113]
+  - generic [ref=e128]:
+    - generic [ref=e129]:
+      - region "Live activity board" [ref=e131]
+      - region "Replay controls" [ref=e144]
+      - search "Filter controls" [ref=e157]
+      - region "Event timeline" [ref=e189]
+    - complementary "Event inspector" [ref=e388]:
+      - heading "Event Inspector" [level=3] [ref=e389]
+      - paragraph [ref=e390]: Select a timeline entry to inspect.

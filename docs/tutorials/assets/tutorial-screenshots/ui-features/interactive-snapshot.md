@@ -1,0 +1,80 @@
+- main [ref=e3]:
+  - generic [ref=e4]:
+    - heading "Copilot Activity Visualiser" [level=1] [ref=e5]
+    - generic [ref=e6]:
+      - generic [ref=e7]: 🔄 Replay Mode
+      - status [ref=e8]: Connected
+  - region "Tool pairing diagnostics" [ref=e11]:
+    - generic [ref=e12]: Tool Pairing
+    - 'generic "Pairs: 16. Total matched tool calls. All preToolUse to postToolUse pairs found across the current session data, regardless of whether they matched exactly or by fallback heuristic." [ref=e13]':
+      - generic [ref=e14]: "Pairs:"
+      - text: "16"
+    - 'generic "by ID: 2. Exact match by toolCallId. Highest-confidence pairing. The preToolUse and postToolUse events carried the same toolCallId in their payloads, so no heuristic was needed." [ref=e15]':
+      - generic [ref=e16]: "by ID:"
+      - text: "2"
+    - 'generic "by Span: 1. Exact match by spanId. Second-tier exact pairing. No toolCallId was available, but both events carried the same spanId in the envelope, so the pair was still correlated precisely." [ref=e17]':
+      - generic [ref=e18]: "by Span:"
+      - text: "1"
+    - 'generic "Heuristic: 13. Fallback FIFO heuristic. Lowest-confidence pairing. No exact toolCallId or spanId match was available, so the ingest service paired events by tool name and arrival order." [ref=e19]':
+      - generic [ref=e20]: "Heuristic:"
+      - text: "13"
+    - 'generic "Unmatched: 1. Events without a matching pair. These preToolUse or postToolUse events could not be paired at all. This usually indicates missing end events, incomplete metadata, or out-of-order input." [ref=e21]':
+      - generic [ref=e22]: "Unmatched:"
+      - text: "1"
+  - generic [ref=e23]:
+    - heading "Timeline" [level=2] [ref=e24]
+    - region "Gantt chart" [ref=e25]:
+      - generic [ref=e26]:
+        - generic [ref=e27]
+        - listitem "Session" [ref=e37]
+        - 'listitem "Tool: bash" [ref=e68]'
+        - 'listitem "Tool: create" [ref=e75]'
+        - 'listitem "Tool: edit" [ref=e79]'
+        - 'listitem "Tool: read_agent" [ref=e83]'
+        - 'listitem "Tool: report_intent" [ref=e88]'
+        - 'listitem "Tool: show_file" [ref=e92]'
+        - 'listitem "Tool: skill" [ref=e97]'
+        - 'listitem "Tool: task" [ref=e101]'
+        - 'listitem "Tool: view" [ref=e106]'
+        - 'listitem "Agent: explore" [ref=e111]'
+        - 'listitem "Agent: qa-engineer" [ref=e116]'
+        - generic [ref=e120]
+      - generic "Gantt chart legend" [ref=e130]:
+        - generic [ref=e131]: Session
+        - generic [ref=e133]: Tool
+        - generic [ref=e135]: Agent
+        - generic [ref=e137]: Prompt
+        - generic [ref=e139]
+        - generic [ref=e141]
+        - generic [ref=e143]: Idle
+  - generic [ref=e145]:
+    - generic [ref=e146]:
+      - region "Live activity board" [ref=e148]:
+        - heading "Live Activity" [level=2] [ref=e149]
+        - list [ref=e150]
+      - region "Replay controls" [ref=e161]:
+        - heading "Replay" [level=2] [ref=e162]
+        - generic [ref=e163]
+        - generic [ref=e170]
+      - search "Filter controls" [ref=e174]:
+        - heading "Filters" [level=2] [ref=e175]
+        - generic [ref=e176]: Actor / Tool Name
+        - textbox "Actor / Tool Name" [ref=e177]:
+          - /placeholder: Filter by agent or tool name…
+        - group "Event Types" [ref=e178]
+      - region "Event timeline" [ref=e206]:
+        - heading "Events (2)" [level=2] [ref=e207]
+        - generic [ref=e208]
+        - list [ref=e212]
+    - complementary "Event inspector" [ref=e224]:
+      - heading "Event Inspector" [level=3] [ref=e225]
+      - generic [ref=e226]:
+        - term [ref=e227]: Event ID
+        - definition [ref=e228]
+        - term [ref=e230]: Type
+        - definition [ref=e231]: postToolUse
+        - term [ref=e232]: Timestamp
+        - definition [ref=e233]: 2026-04-16T23:10:29.190Z
+        - term [ref=e234]: Session ID
+        - definition [ref=e235]: c9c7bf25-16ba-4cb4-8e9d-5f4535078f1b
+      - generic "Event payload" [ref=e236]: "{ \"toolName\": \"bash\", \"status\": \"success\", \"toolArgs\": { \"command\": \"ls -lh /tmp/copilot-hooks-lab/README.md 2>/dev/null && head -50 /tmp/copilot-hooks-lab/README.md\", \"description\": \"Check README status and content\" }, \"taskDescription\": \"Check README status and content\" }"
