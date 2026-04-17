@@ -11,8 +11,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "npm run -ws build",
-    "typecheck": "npm run -ws typecheck",
+    "build": "npm run --workspaces build",
+    "typecheck": "npm run --workspaces typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:e2e": "tsx scripts/smoke-e2e.ts",
