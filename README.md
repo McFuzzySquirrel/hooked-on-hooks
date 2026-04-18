@@ -28,6 +28,7 @@ Start here if you want the practical, step-by-step learning path:
 - **[From Vanilla to Visualizer (Bash/Linux)](docs/tutorials/from-vanilla-to-visualizer.md)** — six-part walkthrough from raw hooks to full pipeline.
 - **[From Vanilla to Visualizer (PowerShell)](docs/tutorials/from-vanilla-to-visualizer-ps1.md)** — PowerShell-focused version of the same journey.
 - **[UI Feature Showcase](docs/tutorials/ui-feature-showcase.md)** — screenshot tour of the live board, replay controls, filters, pairing diagnostics, and inspector.
+- **[Multi-Agent Build Visualization](docs/tutorials/multi-agent-build-visualization.md)** — short recording that shows a full multi-agent build and live visualizer feedback.
 - **[Vanilla Hook Examples](docs/examples/vanilla-hooks/)** — minimal `.sh` + `.ps1` scripts for all 8 hook types.
 - **[Hooked on Hooks](docs/hooked-on-hooks.md)** — practical patterns and lessons learned building this visualiser.
 
