@@ -183,6 +183,13 @@ scan the entire timeline.
 Replay mode lets you scrub through persisted sessions, adjust playback speed,
 and jump directly to the first failure.
 
+**Reporting controls**
+
+![Header controls with Export CSV reporting action](../assets/tutorial-screenshots/ui-features/ui-reporting-export-csv.png)
+
+Use the Export CSV action to download the current session event stream for
+offline review, spreadsheet analysis, or incident handoff.
+
 **Event inspector**
 
 ![Event inspector showing a traced `postToolUse` payload](../assets/tutorial-screenshots/ui-features/ui-event-inspector-tracing.png)
