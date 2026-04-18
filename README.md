@@ -11,6 +11,12 @@ Visualize Copilot agent runtime activity in real time and replay sessions from p
 
 ![UI overview of the live board, replay controls, filters, and inspector](docs/tutorials/assets/tutorial-screenshots/ui-features/ui-overview.png)
 
+> [!TIP]
+> New reporting flow: export the active session as CSV directly from the header.
+> See the [Reporting Controls](docs/tutorials/ui-feature-showcase.md#reporting-controls) section and screenshot below.
+>
+> ![Reporting controls with Export CSV action](docs/tutorials/assets/tutorial-screenshots/ui-features/ui-reporting-export-csv.png)
+
 See the [UI Feature Showcase](docs/tutorials/ui-feature-showcase.md) for a
 panel-by-panel walkthrough of the visualizer interface.
 
@@ -48,6 +54,7 @@ The project is complete for the planned MVP scope:
 - Enriched tool event payloads (when provided by host hooks): tool args, agent context, and optional skill metadata
 - Synthesized subagent lifecycle from task dispatch metadata (`toolArgs.agent_type`): start on task completion, stop on `agentStop`
 - CSV session export — one-click download of all session events as a CSV file with RFC 4180 escaping
+- Reporting docs and screenshot — see [UI Feature Showcase: Reporting Controls](docs/tutorials/ui-feature-showcase.md#reporting-controls)
 - Live feed pause/resume — freeze the display for inspection without losing incoming events; resume flushes buffered state
 
 ## Getting Started

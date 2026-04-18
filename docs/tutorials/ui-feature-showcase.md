@@ -10,7 +10,7 @@ explanations.
 
 The finished screen combines six surfaces that matter during investigation:
 pairing diagnostics, the Gantt timeline, live activity, replay controls,
-filtering, and the event inspector.
+filtering, reporting controls, and the event inspector.
 
 ## Tool Pairing
 
@@ -43,6 +43,14 @@ specific event.
 
 Replay mode reconstructs a session from persisted JSONL, supports speed
 changes, and lets you jump directly to the first failure.
+
+## Reporting Controls
+
+![Reporting controls with Export CSV action](./assets/tutorial-screenshots/ui-features/ui-reporting-export-csv.png)
+
+The header action exports the currently selected session events to CSV, which
+is useful for offline analysis, sharing incident slices, or importing into
+spreadsheets.
 
 ## Filters
 
