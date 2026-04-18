@@ -7,6 +7,7 @@ This index helps you choose a tutorial track and jump directly to any part.
 - Bash/Linux track: [From Vanilla to Visualizer](./from-vanilla-to-visualizer.md)
 - PowerShell track: [From Vanilla to Visualizer (PowerShell)](./from-vanilla-to-visualizer-ps1.md)
 - UI walkthrough: [UI Feature Showcase](./ui-feature-showcase.md)
+- Multi-agent demo video: [Multi-Agent Build Visualization](./multi-agent-build-visualization.md)
 - Screenshot guide: [Tutorial Screenshot Assets](./assets/tutorial-screenshots/README.md)
 
 ## Relevant ADRs
