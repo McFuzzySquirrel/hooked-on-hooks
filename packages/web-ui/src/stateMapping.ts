@@ -75,14 +75,17 @@ export function mapStateToLanes(state: SessionState): LaneData[] {
 
   // --- Subagent lane (rendered while a subagent is active) ---
   if (state.activeSubagent) {
-    const displayName = state.activeSubagent.agentDisplayName ?? state.activeSubagent.agentName;
-    const typePrefix = state.activeSubagent.agentType
-      ? `[${state.activeSubagent.agentType}] `
-      : "";
+    // agentType is the actual agent role (e.g. "ui-hud-developer")
+    // agentName is the task instance name (e.g. "f2-responsive-layout")
+    const agentRole = state.activeSubagent.agentType;
+    const taskName = state.activeSubagent.agentDisplayName ?? state.activeSubagent.agentName;
+    const label = agentRole && agentRole !== taskName
+      ? `Agent: ${agentRole} (${taskName})`
+      : `Agent: ${taskName}`;
 
     lanes.push({
       id: "subagent",
-      label: `Agent: ${typePrefix}${displayName}`,
+      label,
       status: "subagent_running",
       details:
         state.activeSubagent.agentDescription
