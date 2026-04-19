@@ -8,7 +8,7 @@
     "shared/*"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "scripts": {
     "build": "npm run --workspaces build",
@@ -25,14 +25,12 @@
     "clean": "rm -rf coverage dist .tmp"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "playwright": "^1.59.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vitest": "^4.0.2"
-  },
-  "dependencies": {
-    "@playwright/test": "^1.59.1",
-    "playwright": "^1.59.1"
   }
 }
