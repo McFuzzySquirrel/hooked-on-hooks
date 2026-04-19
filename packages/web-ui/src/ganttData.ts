@@ -85,44 +85,73 @@ function agentNameFrom(payload: Record<string, unknown>): string {
  * are more than COLLAPSE_THRESHOLD in a row. The returned `visible` array
  * contains only the segments that should render as individual bars; collapsed
  * runs are replaced by a single summary segment and collected in `groups`.
+ *
+ * P1-2: Also detects parallel batches — segments whose start times fall within
+ * PARALLEL_WINDOW_MS of each other — and collapses those into a single summary
+ * even if the batch is smaller than COLLAPSE_THRESHOLD.
  */
 const COLLAPSE_THRESHOLD = 3;
+const PARALLEL_WINDOW_MS = 3000;
 
 function collapseRepeatedSegments(segments: GanttSegment[]): {
   visible: GanttSegment[];
   groups: CollapsedGroup[];
 } {
-  if (segments.length <= COLLAPSE_THRESHOLD) {
+  if (segments.length <= 1) {
     return { visible: segments, groups: [] };
   }
 
+  // First pass: identify parallel batches (2+ segments that overlap temporally)
+  const parallelBatchIndices = new Set<number>();
+  const batches: number[][] = [];
+  let batchStart = 0;
+
+  while (batchStart < segments.length) {
+    if (segments[batchStart].endTime === null) {
+      batchStart++;
+      continue;
+    }
+    // Find segments that overlap with the anchor segment
+    const anchorEnd = segments[batchStart].endTime!;
+    let batchEnd = batchStart + 1;
+    while (
+      batchEnd < segments.length &&
+      segments[batchEnd].endTime !== null &&
+      segments[batchEnd].startTime < anchorEnd // actual temporal overlap
+    ) {
+      batchEnd++;
+    }
+    const batchSize = batchEnd - batchStart;
+    if (batchSize >= 2) {
+      const batch: number[] = [];
+      for (let i = batchStart; i < batchEnd; i++) {
+        parallelBatchIndices.add(i);
+        batch.push(i);
+      }
+      batches.push(batch);
+      batchStart = batchEnd;
+    } else {
+      batchStart++;
+    }
+  }
+
+  // Second pass: collapse consecutive completed runs AND parallel batches
   const visible: GanttSegment[] = [];
   const groups: CollapsedGroup[] = [];
-  let runStart = 0;
+  let i = 0;
 
-  while (runStart < segments.length) {
-    // Find the end of a consecutive run of completed (non-running) segments
-    let runEnd = runStart;
-    while (
-      runEnd < segments.length &&
-      segments[runEnd].endTime !== null &&
-      segments[runEnd].status !== "running"
-    ) {
-      runEnd++;
-    }
-
-    const runLength = runEnd - runStart;
-    if (runLength > COLLAPSE_THRESHOLD) {
-      // Collapse this run into a summary
-      const children = segments.slice(runStart, runEnd);
+  while (i < segments.length) {
+    // Check if this index starts a parallel batch
+    const batch = batches.find((b) => b[0] === i);
+    if (batch) {
+      const children = batch.map((idx) => segments[idx]);
       const totalMs = children.reduce((sum, s) => {
-        const dur = (s.endTime ?? s.startTime) - s.startTime;
-        return sum + dur;
+        return sum + ((s.endTime ?? s.startTime) - s.startTime);
       }, 0);
       const group: CollapsedGroup = {
         id: `collapsed-${children[0].id}`,
-        label: `${runLength}× ${children[0].label} (${formatDurationShort(totalMs)})`,
-        count: runLength,
+        label: `${children.length}× ${children[0].label} (${formatDurationShort(totalMs)})`,
+        count: children.length,
         totalDurationMs: totalMs,
         startTime: children[0].startTime,
         endTime: children[children.length - 1].endTime ?? children[children.length - 1].startTime,
@@ -130,7 +159,6 @@ function collapseRepeatedSegments(segments: GanttSegment[]): {
         children,
       };
       groups.push(group);
-      // Add a single summary segment to visible
       visible.push({
         id: group.id,
         label: group.label,
@@ -139,22 +167,58 @@ function collapseRepeatedSegments(segments: GanttSegment[]): {
         endTime: group.endTime,
         status: "succeeded",
         eventType: "collapsed",
-        details: { count: runLength, totalDurationMs: totalMs },
+        details: { count: children.length, totalDurationMs: totalMs, parallel: true },
       });
-    } else {
-      // Not enough to collapse — keep individual segments
-      for (let i = runStart; i < runEnd; i++) {
-        visible.push(segments[i]);
+      i = batch[batch.length - 1] + 1;
+      continue;
+    }
+
+    // Not part of a parallel batch — check for consecutive completed run
+    if (segments[i].endTime !== null && segments[i].status !== "running") {
+      let runEnd = i;
+      while (
+        runEnd < segments.length &&
+        segments[runEnd].endTime !== null &&
+        segments[runEnd].status !== "running" &&
+        !parallelBatchIndices.has(runEnd)
+      ) {
+        runEnd++;
+      }
+      const runLength = runEnd - i;
+      if (runLength > COLLAPSE_THRESHOLD) {
+        const children = segments.slice(i, runEnd);
+        const totalMs = children.reduce((sum, s) => {
+          return sum + ((s.endTime ?? s.startTime) - s.startTime);
+        }, 0);
+        const group: CollapsedGroup = {
+          id: `collapsed-${children[0].id}`,
+          label: `${runLength}× ${children[0].label} (${formatDurationShort(totalMs)})`,
+          count: runLength,
+          totalDurationMs: totalMs,
+          startTime: children[0].startTime,
+          endTime: children[children.length - 1].endTime ?? children[children.length - 1].startTime,
+          category: children[0].category,
+          children,
+        };
+        groups.push(group);
+        visible.push({
+          id: group.id,
+          label: group.label,
+          category: group.category,
+          startTime: group.startTime,
+          endTime: group.endTime,
+          status: "succeeded",
+          eventType: "collapsed",
+          details: { count: runLength, totalDurationMs: totalMs },
+        });
+        i = runEnd;
+        continue;
       }
     }
 
-    // Push any running/non-completed segments that broke the run.
-    // Check endTime === null (the canonical "still open" indicator).
-    if (runEnd < segments.length && segments[runEnd].endTime === null) {
-      visible.push(segments[runEnd]);
-      runEnd++;
-    }
-    runStart = runEnd;
+    // Single segment — keep as-is
+    visible.push(segments[i]);
+    i++;
   }
 
   return { visible, groups };
@@ -512,4 +576,78 @@ export function findLatestRunningSegmentId(rows: GanttRow[]): string | null {
   }
 
   return latestId;
+}
+
+/* ------------------------------------------------------------------ */
+/*  P2-3: Parallel execution detection                                 */
+/* ------------------------------------------------------------------ */
+
+export interface ParallelBatch {
+  id: string;
+  /** Row IDs of the segments that overlap. */
+  rowIds: string[];
+  /** Segment IDs of the overlapping segments. */
+  segmentIds: string[];
+  startTime: number;
+  endTime: number;
+  concurrency: number;
+}
+
+/**
+ * Detect segments across different rows that overlap temporally, indicating
+ * parallel tool execution. Returns batch descriptors that the UI can use to
+ * render bracket indicators or concurrency labels.
+ */
+export function detectParallelBatches(rows: GanttRow[]): ParallelBatch[] {
+  // Gather all concrete segments (not collapsed, not session/prompt/error markers)
+  const allSegments: Array<{ rowId: string; seg: GanttSegment }> = [];
+  for (const row of rows) {
+    if (row.rowId === "session") continue;
+    for (const seg of row.segments) {
+      if (seg.eventType === "collapsed" || seg.endTime === null) continue;
+      if (seg.startTime === seg.endTime) continue; // point-in-time
+      allSegments.push({ rowId: row.rowId, seg });
+    }
+  }
+
+  if (allSegments.length < 2) return [];
+
+  // Sort by start time
+  allSegments.sort((a, b) => a.seg.startTime - b.seg.startTime);
+
+  const batches: ParallelBatch[] = [];
+  const used = new Set<string>();
+  let batchSeq = 0;
+
+  for (let i = 0; i < allSegments.length; i++) {
+    if (used.has(allSegments[i].seg.id)) continue;
+    const anchor = allSegments[i];
+    const anchorEnd = anchor.seg.endTime!;
+    const members = [anchor];
+
+    for (let j = i + 1; j < allSegments.length; j++) {
+      if (used.has(allSegments[j].seg.id)) continue;
+      const candidate = allSegments[j];
+      if (candidate.seg.startTime >= anchorEnd) break;
+      // Overlaps with anchor — different row required for cross-row parallelism
+      if (candidate.rowId !== anchor.rowId) {
+        members.push(candidate);
+      }
+    }
+
+    if (members.length >= 2) {
+      const batchEnd = Math.max(...members.map((m) => m.seg.endTime!));
+      batches.push({
+        id: `parallel-batch-${++batchSeq}`,
+        rowIds: members.map((m) => m.rowId),
+        segmentIds: members.map((m) => m.seg.id),
+        startTime: anchor.seg.startTime,
+        endTime: batchEnd,
+        concurrency: members.length,
+      });
+      for (const m of members) used.add(m.seg.id);
+    }
+  }
+
+  return batches;
 }

@@ -117,3 +117,96 @@ function removeFromToolQueue(openByToolName: Map<string, PreToolEvent[]>, target
   queue.splice(idx, 1);
   openByToolName.set(target.payload.toolName, queue);
 }
+
+/* ------------------------------------------------------------------ */
+/*  P2-1: Execution time breakdown                                     */
+/* ------------------------------------------------------------------ */
+
+export interface TimeBreakdown {
+  totalDurationMs: number;
+  toolExecutionMs: number;
+  llmThinkingMs: number;
+  userWaitMs: number;
+  agentWaitMs: number;
+}
+
+/**
+ * Compute a time breakdown for a session: how much time was spent in tool
+ * execution, LLM thinking (gaps between tools), user waits (ask_user), and
+ * agent waits (read_agent).
+ */
+export function computeTimeBreakdown(events: EventEnvelope[]): TimeBreakdown {
+  if (events.length === 0) {
+    return { totalDurationMs: 0, toolExecutionMs: 0, llmThinkingMs: 0, userWaitMs: 0, agentWaitMs: 0 };
+  }
+
+  const sorted = [...events].sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  const sessionStart = Date.parse(sorted[0].timestamp);
+  const sessionEnd = Date.parse(sorted[sorted.length - 1].timestamp);
+  const totalDurationMs = Math.max(0, sessionEnd - sessionStart);
+
+  const pairs = pairToolEvents(events);
+  let toolExecutionMs = 0;
+  let userWaitMs = 0;
+  let agentWaitMs = 0;
+
+  for (const pair of pairs) {
+    const start = Date.parse(pair.pre.timestamp);
+    const end = Date.parse(pair.post.timestamp);
+    const duration = Math.max(0, end - start);
+
+    const toolName = pair.pre.payload.toolName;
+    if (toolName === "ask_user") {
+      userWaitMs += duration;
+    } else if (toolName === "read_agent" || toolName === "write_agent") {
+      agentWaitMs += duration;
+    } else {
+      toolExecutionMs += duration;
+    }
+  }
+
+  const llmThinkingMs = Math.max(0, totalDurationMs - toolExecutionMs - userWaitMs - agentWaitMs);
+
+  return { totalDurationMs, toolExecutionMs, llmThinkingMs, userWaitMs, agentWaitMs };
+}
+
+/* ------------------------------------------------------------------ */
+/*  P2-2: Tool usage distribution                                      */
+/* ------------------------------------------------------------------ */
+
+export interface ToolDistributionEntry {
+  toolName: string;
+  count: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+}
+
+/**
+ * Compute tool usage distribution: how many times each tool was used and
+ * the total/average duration of each.
+ */
+export function computeToolDistribution(events: EventEnvelope[]): ToolDistributionEntry[] {
+  const pairs = pairToolEvents(events);
+  const byTool = new Map<string, { count: number; totalMs: number }>();
+
+  for (const pair of pairs) {
+    const name = pair.pre.payload.toolName;
+    const start = Date.parse(pair.pre.timestamp);
+    const end = Date.parse(pair.post.timestamp);
+    const duration = Math.max(0, end - start);
+
+    const entry = byTool.get(name) ?? { count: 0, totalMs: 0 };
+    entry.count++;
+    entry.totalMs += duration;
+    byTool.set(name, entry);
+  }
+
+  return [...byTool.entries()]
+    .map(([toolName, { count, totalMs }]) => ({
+      toolName,
+      count,
+      totalDurationMs: totalMs,
+      avgDurationMs: count > 0 ? Math.round(totalMs / count) : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
