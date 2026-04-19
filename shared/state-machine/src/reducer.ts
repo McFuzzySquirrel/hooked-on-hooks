@@ -1,5 +1,5 @@
 import type { EventEnvelope } from "../../../shared/event-schema/src/index.js";
-import type { SessionState } from "./types.js";
+import type { SessionState, ToolInfo } from "./types.js";
 
 /**
  * Returns the canonical empty SessionState for a given sessionId.
