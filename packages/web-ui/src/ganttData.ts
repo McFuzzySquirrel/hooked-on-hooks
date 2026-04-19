@@ -81,6 +81,28 @@ function agentNameFrom(payload: Record<string, unknown>): string {
 }
 
 /**
+ * Build a display label for a subagent, preferring agentType (the role) as
+ * primary and agentName (the task instance) as context detail.
+ */
+function agentLabelFrom(payload: Record<string, unknown>): string {
+  const agentType = typeof payload.agentType === "string" ? payload.agentType : undefined;
+  const taskName = agentNameFrom(payload);
+  if (agentType && agentType !== taskName) {
+    return `${agentType} (${taskName})`;
+  }
+  return taskName;
+}
+
+/**
+ * Return the agentType (role) from the payload when available, falling back
+ * to agentNameFrom for use as the tool-attribution context label.
+ */
+function agentContextFrom(payload: Record<string, unknown>): string {
+  if (typeof payload.agentType === "string") return payload.agentType;
+  return agentNameFrom(payload);
+}
+
+/**
  * R5: Collapse consecutive completed segments into summary groups when there
  * are more than COLLAPSE_THRESHOLD in a row. The returned `visible` array
  * contains only the segments that should render as individual bars; collapsed
@@ -401,11 +423,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       case "subagentStart": {
         closeIdleGap(t);
         const name = agentNameFrom(payload);
-        activeAgentContext = name;
+        activeAgentContext = agentContextFrom(payload);
         const rowKey = `subagent:${name}`;
         const seg: GanttSegment = {
           id: ev.eventId,
-          label: `Agent: ${name}`,
+          label: `Agent: ${agentLabelFrom(payload)}`,
           category: "subagent",
           startTime: t,
           endTime: null,
@@ -542,10 +564,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
     a[0].localeCompare(b[0])
   );
   for (const [rowKey, segments] of subEntries) {
-    const name = rowKey.replace(/^subagent:/, "");
+    // Use the label from the first segment (computed with agentLabelFrom at start)
+    const displayLabel = segments[0]?.label ?? `Agent: ${rowKey.replace(/^subagent:/, "")}`;
     rows.push({
       rowId: rowKey,
-      label: `Agent: ${name}`,
+      label: displayLabel,
       segments,
     });
   }

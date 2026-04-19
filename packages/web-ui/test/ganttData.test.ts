@@ -131,6 +131,41 @@ describe("buildGanttData", () => {
     expect(agentRow!.label).toBe("Agent: Explorer Agent");
   });
 
+  it("shows agentType as primary in Gantt agent row label", () => {
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", {
+        agentName: "f4-tooltips",
+        agentType: "ui-hud-developer",
+      }),
+      makeEvent("subagentStop", { agentName: "f4-tooltips" }),
+    ];
+    const rows = buildGanttData(events);
+    const agentRow = rows.find((r) => r.rowId === "subagent:f4-tooltips");
+
+    expect(agentRow).toBeDefined();
+    expect(agentRow!.label).toBe("Agent: ui-hud-developer (f4-tooltips)");
+  });
+
+  it("uses agentType for tool attribution context label", () => {
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", {
+        agentName: "f4-tooltips",
+        agentType: "ui-hud-developer",
+      }),
+      makeEvent("preToolUse", { toolName: "read_agent" }),
+      makeEvent("postToolUse", { toolName: "read_agent", status: "success" }),
+      makeEvent("subagentStop", { agentName: "f4-tooltips" }),
+      makeEvent("sessionEnd", {}),
+    ];
+    const rows = buildGanttData(events);
+    const toolRow = rows.find((r) => r.rowId === "tool:ui-hud-developer:read_agent");
+
+    expect(toolRow).toBeDefined();
+    expect(toolRow!.label).toBe("Tool: read_agent (ui-hud-developer)");
+  });
+
   it("returns empty rows for no events", () => {
     expect(buildGanttData([])).toEqual([]);
   });
