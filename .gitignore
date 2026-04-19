@@ -4,3 +4,4 @@ coverage/
 *.log
 .tmp/
 docs/experiment/
+docs/tutorials/experiment/

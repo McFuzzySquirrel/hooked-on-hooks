@@ -265,3 +265,234 @@ describe("STAT-FR-03: Restart recovery", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Concurrent tool execution (P0-1)
+// ---------------------------------------------------------------------------
+
+describe("Concurrent tool execution (P0-1)", () => {
+  it("tracks multiple concurrent in-flight tools in activeTools", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+
+    const preA = makeEvent("preToolUse", { toolName: "view", toolArgs: { path: "a.ts" } }, 1);
+    const preB = makeEvent("preToolUse", { toolName: "view", toolArgs: { path: "b.ts" } }, 2);
+
+    state = reduceEvent(state, preA);
+    expect(Object.keys(state.activeTools)).toHaveLength(1);
+    expect(state.visualization).toBe("tool_running");
+
+    state = reduceEvent(state, preB);
+    expect(Object.keys(state.activeTools)).toHaveLength(2);
+    expect(state.visualization).toBe("tool_running");
+  });
+
+  it("removes tools from activeTools on postToolUse and stays tool_running if more remain", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+
+    const preA = makeEvent("preToolUse", { toolName: "view" }, 1);
+    const preB = makeEvent("preToolUse", { toolName: "grep" }, 2);
+
+    state = reduceEvent(state, preA);
+    state = reduceEvent(state, preB);
+    expect(Object.keys(state.activeTools)).toHaveLength(2);
+
+    // Complete the first tool — one still remains
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "view", status: "success" }, 3));
+    expect(Object.keys(state.activeTools)).toHaveLength(1);
+    expect(state.visualization).toBe("tool_running");
+
+    // Complete the second — none remain
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "grep", status: "success" }, 4));
+    expect(Object.keys(state.activeTools)).toHaveLength(0);
+    expect(state.visualization).toBe("tool_succeeded");
+  });
+
+  it("currentTool reflects the most recently completed tool", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view" }, 1));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "grep" }, 2));
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "grep", status: "success", durationMs: 5 }, 3));
+
+    expect(state.currentTool?.toolName).toBe("grep");
+    expect(state.currentTool?.durationMs).toBe(5);
+  });
+
+  it("matches postToolUse by toolCallId when available", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view", toolCallId: "call-1" }, 1));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view", toolCallId: "call-2" }, 2));
+
+    // Complete the second one first (by toolCallId)
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "view", status: "success", toolCallId: "call-2" }, 3));
+    expect(Object.keys(state.activeTools)).toHaveLength(1);
+    // The remaining tool should be call-1
+    const remaining = Object.values(state.activeTools);
+    expect(remaining[0]?.toolCallId).toBe("call-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Orphaned tool handling (P0-3)
+// ---------------------------------------------------------------------------
+
+describe("Orphaned tool handling (P0-3)", () => {
+  it("sessionEnd clears activeTools and increments orphanedToolCount", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "create" }, 1));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "edit" }, 2));
+    // No postToolUse — session ends with 2 orphans
+    state = reduceEvent(state, makeEvent("sessionEnd", {}, 3));
+
+    expect(Object.keys(state.activeTools)).toHaveLength(0);
+    expect(state.orphanedToolCount).toBe(2);
+    expect(state.lifecycle).toBe("completed");
+    expect(state.visualization).toBe("idle");
+  });
+
+  it("orphanedToolCount accumulates across multiple sessionEnd events", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view" }, 1));
+    state = reduceEvent(state, makeEvent("sessionEnd", {}, 2));
+    expect(state.orphanedToolCount).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Agent name fallback (P0-4)
+// ---------------------------------------------------------------------------
+
+describe("Agent name fallback (P0-4)", () => {
+  it("agentStop preserves agentName when provided", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("agentStop", { agentName: "orchestrator" }, 1));
+    expect(state.lastAgentName).toBe("orchestrator");
+  });
+
+  it("agentStop falls back to lastAgentName when agentName is empty", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("agentStop", { agentName: "first-agent" }, 1));
+    state = reduceEvent(state, makeEvent("agentStop", {}, 2));
+    expect(state.lastAgentName).toBe("first-agent");
+  });
+
+  it("lastAgentName remains null when no agent name is ever provided", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("agentStop", {}, 1));
+    expect(state.lastAgentName).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Intent tracking (P1-1)
+// ---------------------------------------------------------------------------
+
+describe("Intent tracking (P1-1)", () => {
+  it("extracts currentIntent from report_intent preToolUse", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", {
+      toolName: "report_intent",
+      toolArgs: { intent: "Building feature PRD" }
+    }, 1));
+    expect(state.currentIntent).toBe("Building feature PRD");
+  });
+
+  it("updates currentIntent on subsequent report_intent calls", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", {
+      toolName: "report_intent",
+      toolArgs: { intent: "Exploring codebase" }
+    }, 1));
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "report_intent", status: "success" }, 2));
+    state = reduceEvent(state, makeEvent("preToolUse", {
+      toolName: "report_intent",
+      toolArgs: { intent: "Implementing changes" }
+    }, 3));
+    expect(state.currentIntent).toBe("Implementing changes");
+  });
+
+  it("non-report_intent tools do not change currentIntent", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", {
+      toolName: "report_intent",
+      toolArgs: { intent: "Phase 1" }
+    }, 1));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view" }, 2));
+    expect(state.currentIntent).toBe("Phase 1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wait state visualization (P1-3)
+// ---------------------------------------------------------------------------
+
+describe("Wait state visualization (P1-3)", () => {
+  it("ask_user sets visualization to waiting_for_user", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "ask_user" }, 1));
+    expect(state.visualization).toBe("waiting_for_user");
+  });
+
+  it("read_agent sets visualization to waiting_for_agent", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "read_agent" }, 1));
+    expect(state.visualization).toBe("waiting_for_agent");
+  });
+
+  it("postToolUse after ask_user returns to tool_succeeded", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "ask_user" }, 1));
+    expect(state.visualization).toBe("waiting_for_user");
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "ask_user", status: "success" }, 2));
+    expect(state.visualization).toBe("tool_succeeded");
+  });
+
+  it("regular tools still set tool_running", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "bash" }, 1));
+    expect(state.visualization).toBe("tool_running");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Turn grouping (P1-4)
+// ---------------------------------------------------------------------------
+
+describe("Turn grouping (P1-4)", () => {
+  it("userPromptSubmitted increments turnCount", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    expect(state.turnCount).toBe(0);
+
+    state = reduceEvent(state, makeEvent("userPromptSubmitted", { prompt: "hello" }, 1));
+    expect(state.turnCount).toBe(1);
+    expect(state.currentTurnStartTime).toBeTruthy();
+
+    state = reduceEvent(state, makeEvent("userPromptSubmitted", { prompt: "next" }, 5));
+    expect(state.turnCount).toBe(2);
+  });
+
+  it("turnCount is preserved across tool events", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("sessionStart", {}, 0));
+    state = reduceEvent(state, makeEvent("userPromptSubmitted", { prompt: "go" }, 1));
+    state = reduceEvent(state, makeEvent("preToolUse", { toolName: "view" }, 2));
+    state = reduceEvent(state, makeEvent("postToolUse", { toolName: "view", status: "success" }, 3));
+    expect(state.turnCount).toBe(1);
+  });
+});
