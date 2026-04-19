@@ -5,7 +5,7 @@
 **Mode**: Feature-Based Build  
 **Product Vision**: docs/product-vision.md  
 **Status**: Complete (MVP + post-MVP enhancements)  
-**Last Updated**: 2026-04-17
+**Last Updated**: 2026-04-19
 
 All five planned MVP features are complete and validated locally. Post-MVP work includes integration tooling (bootstrap/unbootstrap), live board UI polish, tracing v2 (event-stream correlation), and operator UX/learning-surface updates captured in the dedicated post-MVP feature document.
 
@@ -82,6 +82,39 @@ All five planned MVP features are complete and validated locally. Post-MVP work 
       `npm run unbootstrap:repo -- /path/to/repo --apply` then
       `npm run bootstrap:repo -- /path/to/repo --create-hooks`.
 
+## Multi-Agent Session Improvements (Post-MVP)
+
+### Implemented Deliverables
+
+- Concurrent tool tracking — `activeTools: Record<string, ToolInfo>` replaces single-tool assumption; keyed by `eventId`, paired by `toolCallId` then FIFO.
+- Subagent identity enrichment — `agentType` extracted from `task` `preToolUse` `toolArgs.agent_type`; display name prefers instance name (`taskName`) over category (`agentType`).
+- Orphaned tool cleanup — unmatched `preToolUse` events cleared on `sessionEnd`; `orphanedToolCount` tracked in state.
+- Agent name fallback — `agentStop` with empty/`"unknown"` `agentName` falls back to last known agent name.
+- Intent tracking — `report_intent` tool calls extract `toolArgs.intent` into `currentIntent` state field for phase-marker rendering.
+- Wait state differentiation — new `waiting_for_user` and `waiting_for_agent` visualization states for `ask_user` and `read_agent` tools.
+- Turn grouping — `userPromptSubmitted` increments `turnCount` and records `currentTurnStartTime`.
+- Parallel batch collapse — `collapseRepeatedSegments()` detects temporally overlapping segments and collapses them.
+- Execution time breakdown — `computeTimeBreakdown()` returns tool/LLM/user/agent time split.
+- Tool distribution analytics — `computeToolDistribution()` returns per-tool count, total duration, and average duration.
+- Cross-row parallel detection — `detectParallelBatches()` finds concurrent segments across Gantt rows.
+
+### Files Added/Updated
+
+- `shared/state-machine/src/types.ts` (activeTools, currentIntent, turnCount, currentTurnStartTime, orphanedToolCount, agentType, waiting_for_user/agent)
+- `shared/state-machine/src/reducer.ts` (concurrent tool tracking, intent extraction, wait states, turn counting, orphan cleanup, removeMatchingTool helper)
+- `shared/state-machine/src/queries.ts` (computeTimeBreakdown, computeToolDistribution)
+- `shared/state-machine/src/index.ts` (barrel exports)
+- `shared/state-machine/test/state-machine.test.ts` (18 new tests)
+- `shared/state-machine/test/queries.test.ts` (13 new tests)
+- `packages/web-ui/src/ganttData.ts` (parallel batch collapse, detectParallelBatches)
+- `packages/web-ui/test/ganttData.test.ts` (parallel batch and cross-row tests)
+- `packages/web-ui/src/stateMapping.ts` (wait state mapping, tool count display)
+- `packages/ingest-service/src/index.ts` (agentType, name preference)
+- `packages/ingest-service/test/ingest.test.ts` (agentType assertion)
+- `docs/adr/011-multi-agent-session-improvements.md` *(new)*
+- `docs/research/multi-agent-session-event-analysis.md` *(new)*
+- `docs/research/multi-agent-session-implementation-tasks.md` *(new)*
+
 ## UI Improvements (Post-MVP)
 
 ### Implemented Deliverables
@@ -114,6 +147,7 @@ All five planned MVP features are complete and validated locally. Post-MVP work 
 - ADR-006: `docs/adr/006-task-posttooluse-subagent-synthesis.md`
 - ADR-007: `docs/adr/007-readme-quickstart-and-doc-depth-split.md`
 - ADR-008: `docs/adr/008-tracing-ux-and-doc-consolidation.md`
+- ADR-011: `docs/adr/011-multi-agent-session-improvements.md`
 
 ### Implemented Deliverables
 
@@ -142,19 +176,20 @@ All five planned MVP features are complete and validated locally. Post-MVP work 
 ```
 ✓ packages/hook-emitter/test/emitter.test.ts           (4 tests)
 ✓ packages/web-ui/test/replay.test.ts                  (8 tests)
-✓ packages/ingest-service/test/ingest.test.ts          (8 tests)
+✓ packages/ingest-service/test/ingest.test.ts          (9 tests)
 ✓ shared/redaction/test/redaction.test.ts             (37 tests)
 ✓ shared/event-schema/test/schema.test.ts              (5 tests)
-✓ shared/state-machine/test/state-machine.test.ts     (18 tests)
-✓ shared/state-machine/test/queries.test.ts            (5 tests)
+✓ shared/state-machine/test/state-machine.test.ts     (36 tests)
+✓ shared/state-machine/test/queries.test.ts           (18 tests)
 ✓ packages/web-ui/test/stateMapping.test.ts           (17 tests)
 ✓ packages/web-ui/test/filterState.test.ts            (15 tests)
-✓ packages/web-ui/test/ganttData.test.ts              (18 tests)
+✓ packages/web-ui/test/ganttData.test.ts              (22 tests)
 ✓ scripts/test/bootstrap.test.ts                      (15 tests)
 ✓ scripts/test/unbootstrap.test.ts                     (7 tests)
-Test Files  12 passed (12)
-      Tests  205 passed (205)
-Coverage: lines ≥80% (all thresholds pass)
+✓ packages/web-ui/test/queries-analytics.test.ts      (13 tests)
+Test Files  13 passed (13)
+      Tests  258 passed (258)
+Coverage: lines ≥80% (all thresholds pass); reducer 96.29%
 ```
 
 ## Feature Progress
@@ -162,7 +197,7 @@ Coverage: lines ≥80% (all thresholds pass)
 | Feature | File | Status | Notes |
 |---|---|---|---|
 | Foundation Event Capture | docs/features/foundation-event-capture.md | Complete | Implemented and validated locally |
-| Deterministic State Engine | docs/features/deterministic-state-engine.md | Complete | Implemented and validated locally; Phase 3 (Tracing v2) complete |
+| Deterministic State Engine | docs/features/deterministic-state-engine.md | Complete | Implemented and validated locally; Phase 3 (Tracing v2) + Phase 4 (Multi-Agent) complete |
 | Privacy Retention and Export Controls | docs/features/privacy-retention-and-export-controls.md | Complete | Implemented and validated locally |
 | Live Visualization Board | docs/features/live-visualization-board.md | Complete | Implemented and validated locally |
 | Replay and Session Review | docs/features/replay-and-session-review.md | Complete | Implemented and validated locally |

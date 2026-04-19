@@ -333,6 +333,59 @@ See [Tracing Plan v2](roadmap/tracing-plan.md) for the full design rationale
 and phased rollout plan.
 ---
 
+### Lesson 10: Let Real Data Rewrite Your Assumptions
+
+We thought our state machine handled agent sessions well. Then we captured 319
+real events from an 84-minute multi-agent session and discovered we were wrong
+about almost everything.
+
+**What we found:**
+
+- **Parallel tools are the norm, not the exception.** 39 batches of 2–5
+  concurrent tool calls. Our reducer tracked one tool at a time — silently
+  dropping the rest.
+- **Subagent metadata is empty.** `subagentStop` payloads? All blank.
+  `agentName`? Always `"unknown"`. The *only* useful identity lives in the
+  `task` `preToolUse` `toolArgs`, not in the lifecycle events.
+- **Intent tells the story.** 16 `report_intent` calls traced the session's
+  arc from "Exploring codebase" to "Committing and pushing." We'd been
+  treating these as generic tool calls.
+- **Wait states aren't idle.** `ask_user` (2 minutes waiting for human input)
+  and `read_agent` (polling a subagent for 70 seconds) looked identical to
+  "nothing happening" in the UI.
+- **Turns vary 25×.** Turn 2 had 6 events. Turn 5 had 149. A flat event list
+  hides this structure.
+
+**What we did about it:**
+
+```typescript
+// Before: single tool, blind to concurrency
+currentTool: ToolInfo | null;
+
+// After: keyed by eventId, paired by toolCallId → FIFO
+activeTools: Record<string, ToolInfo>;
+currentIntent: string | null;
+turnCount: number;
+orphanedToolCount: number;
+```
+
+We added `waiting_for_user` and `waiting_for_agent` as distinct visualization
+states, so the UI can show *why* the session is paused rather than just showing
+it as idle. We added analytics APIs (`computeTimeBreakdown`,
+`computeToolDistribution`) so you can answer "where did the time go?" from the
+event stream alone.
+
+**The lesson:** Your synthetic test fixtures will lie to you. They'll model
+what you *think* happens. Capture real sessions early, feed them into your
+pipeline, and let the data tell you what your model is missing. We found 11
+gaps from a single recording.
+
+See [ADR-011](adr/011-multi-agent-session-improvements.md) for the full
+design rationale and [multi-agent session analysis](research/multi-agent-session-event-analysis.md)
+for the raw findings.
+
+---
+
 ## Vanilla vs. Enhanced: What the Visualiser Adds
 
 If you've read this far, you might be wondering: *what do the hooks look like
@@ -537,6 +590,7 @@ Want to go deeper? Here are the official sources:
 | 10 | Make idle time visible — gaps between events tell as much as the events themselves |
 | 11 | Keep hooks lightweight — capture the moment, process it elsewhere |
 | 12 | Correlate events in the stream, not in a sidecar DB — replay stays the source of truth |
+| 13 | Capture real sessions early — synthetic fixtures lie about what actually happens |
 
 ---
 
