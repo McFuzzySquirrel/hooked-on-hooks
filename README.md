@@ -57,6 +57,10 @@ The project is complete for the planned MVP scope:
 - CSV session export — one-click download of all session events as a CSV file with RFC 4180 escaping
 - Reporting docs and screenshot — see [UI Feature Showcase: Reporting Controls](docs/tutorials/ui-feature-showcase.md#reporting-controls)
 - Live feed pause/resume — freeze the display for inspection without losing incoming events; resume flushes buffered state
+- Concurrent tool tracking — visualises parallel tool execution with `activeTools` state and parallel batch collapse
+- Intent phase markers — extracts `report_intent` calls to show workflow phase progression
+- Wait state differentiation — distinct `waiting_for_user` and `waiting_for_agent` visual states (vs generic idle)
+- Session analytics — time breakdown (tool/LLM/user/agent split) and per-tool distribution from event streams
 
 ## Getting Started
 
@@ -261,3 +265,5 @@ npm run replay:jsonl -- /path/to/events.jsonl
 - ADR-008: `docs/adr/008-tracing-ux-and-doc-consolidation.md` — umbrella decision for tracing + UX + docs rollout
 - ADR-009: `docs/adr/009-tutorial-alignment-and-pretooluse-examples.md` — tutorial code snippet accuracy and preToolUse standardisation
 - ADR-010: `docs/adr/010-csv-export-and-live-feed-pause.md` — CSV session export and live feed pause/resume
+- ADR-011: `docs/adr/011-multi-agent-session-improvements.md` — concurrent tools, intent tracking, wait states, and analytics
+- Blog: `docs/blog/what-319-events-taught-us.md` — what 319 real events taught us about multi-agent sessions
