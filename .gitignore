@@ -5,3 +5,4 @@ coverage/
 .tmp/
 docs/experiment/
 docs/tutorials/experiment/
+test-results/
