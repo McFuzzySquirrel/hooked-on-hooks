@@ -461,3 +461,89 @@ describe("P2-3 — detectParallelBatches", () => {
     expect(batches).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tool-to-agent attribution
+// ---------------------------------------------------------------------------
+
+describe("tool-to-agent attribution", () => {
+  it("attributes tools to agent context when subagent is active", () => {
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("preToolUse", { toolName: "view" }),
+      makeEvent("postToolUse", { toolName: "view", status: "success" }),
+      makeEvent("subagentStart", { agentName: "explore-task" }),
+      makeEvent("preToolUse", { toolName: "view" }),
+      makeEvent("postToolUse", { toolName: "view", status: "success" }),
+      makeEvent("subagentStop", { agentName: "explore-task" }),
+      makeEvent("sessionEnd", {}),
+    ];
+    const rows = buildGanttData(events);
+
+    const sessionView = rows.find((r) => r.rowId === "tool:view");
+    const agentView = rows.find((r) => r.rowId === "tool:explore-task:view");
+
+    expect(sessionView).toBeDefined();
+    expect(sessionView!.segments).toHaveLength(1);
+    expect(sessionView!.label).toBe("Tool: view");
+
+    expect(agentView).toBeDefined();
+    expect(agentView!.segments).toHaveLength(1);
+    expect(agentView!.label).toBe("Tool: view (explore-task)");
+  });
+
+  it("returns tools to session context after subagent stops", () => {
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", { agentName: "builder" }),
+      makeEvent("preToolUse", { toolName: "bash" }),
+      makeEvent("postToolUse", { toolName: "bash", status: "success" }),
+      makeEvent("subagentStop", { agentName: "builder" }),
+      makeEvent("preToolUse", { toolName: "bash" }),
+      makeEvent("postToolUse", { toolName: "bash", status: "success" }),
+      makeEvent("sessionEnd", {}),
+    ];
+    const rows = buildGanttData(events);
+
+    expect(rows.find((r) => r.rowId === "tool:builder:bash")).toBeDefined();
+    expect(rows.find((r) => r.rowId === "tool:bash")).toBeDefined();
+  });
+
+  it("handles multiple agents with same tool name as separate rows", () => {
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", { agentName: "agent-a" }),
+      makeEvent("preToolUse", { toolName: "edit" }),
+      makeEvent("postToolUse", { toolName: "edit", status: "success" }),
+      makeEvent("subagentStop", { agentName: "agent-a" }),
+      makeEvent("subagentStart", { agentName: "agent-b" }),
+      makeEvent("preToolUse", { toolName: "edit" }),
+      makeEvent("postToolUse", { toolName: "edit", status: "success" }),
+      makeEvent("subagentStop", { agentName: "agent-b" }),
+      makeEvent("sessionEnd", {}),
+    ];
+    const rows = buildGanttData(events);
+
+    expect(rows.find((r) => r.rowId === "tool:agent-a:edit")).toBeDefined();
+    expect(rows.find((r) => r.rowId === "tool:agent-b:edit")).toBeDefined();
+    expect(rows.find((r) => r.rowId === "tool:edit")).toBeUndefined();
+  });
+
+  it("correctly pairs postToolUse when agent context changes between pre and post", () => {
+    // Edge case: subagentStop fires between a tool's pre and post
+    const events: EventEnvelope[] = [
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", { agentName: "worker" }),
+      makeEvent("preToolUse", { toolName: "view" }),
+      makeEvent("subagentStop", { agentName: "worker" }),
+      makeEvent("postToolUse", { toolName: "view", status: "success" }),
+      makeEvent("sessionEnd", {}),
+    ];
+    const rows = buildGanttData(events);
+
+    const workerView = rows.find((r) => r.rowId === "tool:worker:view");
+    expect(workerView).toBeDefined();
+    expect(workerView!.segments[0]!.status).toBe("succeeded");
+    expect(workerView!.segments[0]!.endTime).not.toBeNull();
+  });
+});

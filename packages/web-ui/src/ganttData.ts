@@ -245,6 +245,12 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
   const openTools = new Map<string, GanttSegment>();
   const openSubagents = new Map<string, GanttSegment>();
 
+  // Track which agent context is active so tools can be attributed
+  let activeAgentContext: string | null = null;
+  // Map from tool name → actual row key used at preToolUse time, so postToolUse
+  // can find the correct row even if the agent context changed in between.
+  const toolRowKeyByName = new Map<string, string>();
+
   // Track idle gap starts for session-level idle visualization
   let idleGapStart: number | null = null;
   let idleGapSeq = 0;
@@ -326,10 +332,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       case "preToolUse": {
         closeIdleGap(t);
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = activeAgentContext
+          ? `tool:${activeAgentContext}:${name}`
+          : `tool:${name}`;
 
-        // R4: Auto-close any still-open segment for the same tool name.
-        // This prevents orphaned bars when a postToolUse never arrives.
+        // R4: Auto-close any still-open segment for the same tool row.
         const prevOpen = openTools.get(rowKey);
         if (prevOpen && prevOpen.endTime === null) {
           prevOpen.endTime = t;
@@ -339,7 +346,9 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
 
         const seg: GanttSegment = {
           id: ev.eventId,
-          label: `Tool: ${name}`,
+          label: activeAgentContext
+            ? `Tool: ${name} (${activeAgentContext})`
+            : `Tool: ${name}`,
           category: "tool",
           startTime: t,
           endTime: null,
@@ -348,6 +357,7 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
           details: payload,
         };
         openTools.set(rowKey, seg);
+        toolRowKeyByName.set(name, rowKey);
         if (!toolRows.has(rowKey)) {
           toolRows.set(rowKey, []);
         }
@@ -356,13 +366,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "postToolUse": {
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = toolRowKeyByName.get(name)
+          ?? (activeAgentContext ? `tool:${activeAgentContext}:${name}` : `tool:${name}`);
         const open = openTools.get(rowKey);
         if (open) {
           open.endTime = t;
           open.status = "succeeded";
             open.details = { ...open.details, ...withoutUndefined(payload) };
           openTools.delete(rowKey);
+          toolRowKeyByName.delete(name);
         }
         // Start idle gap after tool completes
         idleGapStart = t;
@@ -370,13 +382,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "postToolUseFailure": {
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = toolRowKeyByName.get(name)
+          ?? (activeAgentContext ? `tool:${activeAgentContext}:${name}` : `tool:${name}`);
         const open = openTools.get(rowKey);
         if (open) {
           open.endTime = t;
           open.status = "failed";
             open.details = { ...open.details, ...withoutUndefined(payload) };
           openTools.delete(rowKey);
+          toolRowKeyByName.delete(name);
         }
         // Start idle gap after tool failure
         idleGapStart = t;
@@ -387,6 +401,7 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       case "subagentStart": {
         closeIdleGap(t);
         const name = agentNameFrom(payload);
+        activeAgentContext = name;
         const rowKey = `subagent:${name}`;
         const seg: GanttSegment = {
           id: ev.eventId,
@@ -407,6 +422,7 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "subagentStop": {
         const name = agentNameFrom(payload);
+        activeAgentContext = null;
         const rowKey = `subagent:${name}`;
         const open = openSubagents.get(rowKey);
         if (open) {
@@ -507,11 +523,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
     a[0].localeCompare(b[0])
   );
   for (const [rowKey, segments] of toolEntries) {
-    const name = rowKey.replace(/^tool:/, "");
+    // Row keys: "tool:name" (session-level) or "tool:agent:name" (agent-attributed)
+    const parts = rowKey.replace(/^tool:/, "").split(":");
+    const label = parts.length > 1
+      ? `Tool: ${parts[parts.length - 1]} (${parts.slice(0, -1).join(":")})`
+      : `Tool: ${parts[0]}`;
     const { visible, groups } = collapseRepeatedSegments(segments);
     rows.push({
       rowId: rowKey,
-      label: `Tool: ${name}`,
+      label,
       segments: visible,
       collapsedGroups: groups.length > 0 ? groups : undefined,
     });
