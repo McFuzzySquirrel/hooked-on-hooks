@@ -1,563 +1,705 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type { SessionState } from "../../../shared/state-machine/src/index.js";
-import type { EventEnvelope } from "../../../shared/event-schema/src/index.js";
-import { initialSessionState } from "../../../shared/state-machine/src/index.js";
-import { mapStateToLanes } from "./stateMapping.js";
-import { applyFilter } from "./filterState.js";
+import { useMemo, useState } from "react";
+import type {
+  DashboardTab,
+  SessionExportData,
+  SessionListData,
+  SortMode,
+} from "./types.js";
 import {
-  buildReplayFrames,
-  findFirstFailureIndex,
-  getPlaybackIntervalMs,
-  getReplayEventAt,
-  getReplayStateAt,
-  stepReplayIndex,
-  toInspectorEntry
-} from "./replay.js";
-import { buildGanttData } from "./ganttData.js";
-import type { GanttSegment } from "./ganttData.js";
-import { LiveBoard } from "./components/LiveBoard.js";
-import { GanttChart } from "./components/GanttChart.js";
-import { EventInspector } from "./components/EventInspector.js";
-import { FilterControls } from "./components/FilterControls.js";
-import { ReplayControls } from "./components/ReplayControls.js";
-import { PairingDiagnosticsPanel } from "./components/PairingDiagnosticsPanel.js";
-import { exportSessionToCsv } from "./csvExport.js";
-import type { FilterConfig, InspectorEntry, ReplaySpeed } from "./types.js";
+  formatBytes,
+  formatDate,
+  normalizeSessionExport,
+  normalizeSessionList,
+} from "./session-dashboard-helpers.js";
 
-/** Pixel threshold below which the event list is considered "scrolled to bottom". */
-const AUTO_SCROLL_THRESHOLD = 40;
-
-/** Ingest service base URL — matches the default Fastify server binding. */
-const INGEST_BASE = "http://127.0.0.1:7070";
-
-/** Color mapping for event type indicator dots in the timeline list. */
-const EVENT_TYPE_COLORS: Record<string, string> = {
-  errorOccurred: "#ef4444",
-  postToolUseFailure: "#ef4444",
-  preToolUse: "#f59e0b",
-  postToolUse: "#22c55e",
-  subagentStart: "#a855f7",
-  subagentStop: "#a855f7",
-  userPromptSubmitted: "#06b6d4",
+const EMPTY_LIST: SessionListData = {
+  generatedAt: "",
+  source: {
+    type: "copilot-session-store-db",
+    dbPath: "",
+  },
+  count: 0,
+  sessions: [],
 };
-const DEFAULT_EVENT_COLOR = "#3b82f6";
 
-function formatRangeTime(ms: number): string {
-  return new Date(ms).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-  });
+const EMPTY_EXPORT: SessionExportData = {
+  exportedAt: "",
+  source: {
+    type: "copilot-session-store-db",
+    dbPath: "",
+  },
+  sessions: [],
+};
+
+const TAB_LABELS: Array<{ id: DashboardTab; label: string }> = [
+  { id: "overview", label: "Overview" },
+  { id: "checkpoints", label: "Checkpoints" },
+  { id: "turns", label: "Turns" },
+  { id: "files", label: "Files" },
+  { id: "models", label: "Models & Tokens" },
+  { id: "search", label: "Search" },
+];
+
+function readJsonFile(file: File): Promise<unknown> {
+  return file.text().then((text) => JSON.parse(text) as unknown);
 }
 
 export function App() {
-  const [sessionState, setSessionState] = useState<SessionState>(
-    initialSessionState("unknown")
-  );
-  const [allEvents, setAllEvents] = useState<EventEnvelope[]>([]);
-  const [filter, setFilter] = useState<FilterConfig>({});
-  const [selected, setSelected] = useState<InspectorEntry | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [replayMode, setReplayMode] = useState(false);
-  const [replayIndex, setReplayIndex] = useState(-1);
-  const [replaySpeed, setReplaySpeed] = useState<ReplaySpeed>(() => {
-    if (typeof localStorage === "undefined") {
-      return 1;
-    }
-    const raw = localStorage.getItem("visualizer.replay.speed");
-    const parsed = Number(raw);
-    return parsed === 0.5 || parsed === 1 || parsed === 2 || parsed === 4 ? parsed : 1;
-  });
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedPeriod, setSelectedPeriod] = useState<{
-    startTime: number;
-    endTime: number;
-    label: string;
-  } | null>(null);
-  const eventListRef = useRef<HTMLUListElement>(null);
-  const userScrolledRef = useRef(false);
+  const [view, setView] = useState<"selector" | "dashboard">("selector");
+  const [sessionList, setSessionList] = useState<SessionListData>(EMPTY_LIST);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sortMode, setSortMode] = useState<SortMode>("recent");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectorError, setSelectorError] = useState("");
 
-  // --- Live feed pause/resume state ---
-  const [livePaused, setLivePaused] = useState(false);
-  const pausedStateRef = useRef<SessionState | null>(null);
-  const pausedEventsRef = useRef<EventEnvelope[] | null>(null);
+  const [exportData, setExportData] = useState<SessionExportData>(EMPTY_EXPORT);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [dashboardFilter, setDashboardFilter] = useState("");
+  const [tab, setTab] = useState<DashboardTab>("overview");
+  const [contentSearch, setContentSearch] = useState("");
+  const [dashboardError, setDashboardError] = useState("");
 
-  // --- SSE connection for real-time state updates (LIVE-FR-03) ---
-  useEffect(() => {
-    const es = new EventSource(`${INGEST_BASE}/state/stream`);
-    es.onopen = () => setConnected(true);
-    es.onmessage = (e) => {
-      const state = JSON.parse(e.data as string) as SessionState;
-      if (livePaused) {
-        pausedStateRef.current = state;
-      } else {
-        setSessionState(state);
-      }
-    };
-    es.onerror = () => setConnected(false);
-    return () => es.close();
-  }, [livePaused]);
-
-  // --- Periodic event list refresh for the inspector timeline ---
-  useEffect(() => {
-    async function fetchEvents(): Promise<void> {
-      try {
-        const res = await fetch(`${INGEST_BASE}/events`);
-        const body = (await res.json()) as { events: EventEnvelope[] };
-        if (livePaused) {
-          pausedEventsRef.current = body.events;
-        } else {
-          setAllEvents(body.events);
-        }
-      } catch {
-        // Ingest service may not be reachable — silently skip
-      }
-    }
-    void fetchEvents();
-    const id = setInterval(() => void fetchEvents(), 2000);
-    return () => clearInterval(id);
-  }, [livePaused]);
-
-  const replayFrames = useMemo(() => buildReplayFrames(allEvents), [allEvents]);
-  const replayEvents = replayFrames.map((frame) => frame.event);
-  const firstFailureIndex = findFirstFailureIndex(replayFrames);
-
-  useEffect(() => {
-    if (replayFrames.length === 0) {
-      setReplayIndex(-1);
-      setIsPlaying(false);
-      return;
-    }
-    setReplayIndex((current) => {
-      if (current < 0 || current >= replayFrames.length) {
-        return replayFrames.length - 1;
-      }
-      return current;
-    });
-  }, [replayFrames.length]);
-
-  useEffect(() => {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem("visualizer.replay.speed", String(replaySpeed));
-    }
-  }, [replaySpeed]);
-
-  useEffect(() => {
-    if (!replayMode || !isPlaying || replayFrames.length === 0) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setReplayIndex((current) => {
-        const next = stepReplayIndex(current, replayFrames.length);
-        if (next >= replayFrames.length - 1) {
-          setIsPlaying(false);
-        }
-        return next;
+  const filteredCards = useMemo(() => {
+    const q = sessionSearch.trim().toLowerCase();
+    let cards = sessionList.sessions;
+    if (q) {
+      cards = cards.filter((card) => {
+        return (
+          card.repository.toLowerCase().includes(q) ||
+          card.sessionId.toLowerCase().includes(q) ||
+          String(card.eventCount).includes(q) ||
+          formatBytes(card.fileSizeBytes).toLowerCase().includes(q)
+        );
       });
-    }, getPlaybackIntervalMs(replaySpeed));
+    }
 
-    return () => window.clearTimeout(timeoutId);
-  }, [isPlaying, replayFrames.length, replayMode, replaySpeed, replayIndex]);
+    cards = [...cards].sort((a, b) => {
+      if (sortMode === "events") {
+        return b.eventCount - a.eventCount;
+      }
+      if (sortMode === "size") {
+        return b.fileSizeBytes - a.fileSizeBytes;
+      }
+      return Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt);
+    });
+    return cards;
+  }, [sessionList.sessions, sessionSearch, sortMode]);
 
-  useEffect(() => {
-    if (!replayMode) {
+  const selectedSummary = useMemo(() => {
+    const selected = sessionList.sessions.filter((card) => selectedIds.has(card.sessionId));
+    return {
+      count: selected.length,
+      events: selected.reduce((sum, card) => sum + card.eventCount, 0),
+      size: selected.reduce((sum, card) => sum + card.fileSizeBytes, 0),
+      ids: selected.map((card) => card.sessionId),
+    };
+  }, [sessionList.sessions, selectedIds]);
+
+  const generatedExportCommand = useMemo(() => {
+    if (selectedSummary.ids.length === 0) {
+      return "";
+    }
+    return `npm run session:export -- --ids ${selectedSummary.ids.join(",")} --out ./session-store-export.json --split --split-dir ./session-exports`;
+  }, [selectedSummary.ids]);
+
+  const dashboardSessions = useMemo(() => {
+    const q = dashboardFilter.trim().toLowerCase();
+    const base = exportData.sessions;
+    if (!q) {
+      return base;
+    }
+    return base.filter((session) => {
+      return (
+        session.summary.toLowerCase().includes(q) ||
+        session.repository.toLowerCase().includes(q) ||
+        session.branch.toLowerCase().includes(q) ||
+        session.sessionId.toLowerCase().includes(q)
+      );
+    });
+  }, [dashboardFilter, exportData.sessions]);
+
+  const activeSession = useMemo(() => {
+    if (dashboardSessions.length === 0) {
+      return null;
+    }
+    const byId = dashboardSessions.find((session) => session.sessionId === activeSessionId);
+    return byId ?? dashboardSessions[0];
+  }, [activeSessionId, dashboardSessions]);
+
+  const searchMatches = useMemo(() => {
+    if (!activeSession || !contentSearch.trim()) {
+      return [] as string[];
+    }
+    const q = contentSearch.toLowerCase();
+    const lines = [
+      ...activeSession.searchBlob,
+      ...activeSession.turns.map((turn) => JSON.stringify(turn)),
+      ...activeSession.checkpoints.map((checkpoint) => JSON.stringify(checkpoint)),
+      ...activeSession.files.map((file) => JSON.stringify(file)),
+      ...activeSession.refs.map((ref) => JSON.stringify(ref)),
+    ];
+
+    return lines
+      .filter((line) => line.toLowerCase().includes(q))
+      .slice(0, 200);
+  }, [activeSession, contentSearch]);
+
+  async function handleLoadSessionList(file: File): Promise<void> {
+    try {
+      setSelectorError("");
+      const raw = await readJsonFile(file);
+      const normalized = normalizeSessionList(raw);
+      setSessionList(normalized);
+      setSelectedIds(new Set());
+    } catch (error) {
+      setSelectorError((error as Error).message);
+    }
+  }
+
+  async function handleLoadExport(file: File): Promise<void> {
+    try {
+      setDashboardError("");
+      const raw = await readJsonFile(file);
+      const normalized = normalizeSessionExport(raw);
+      setExportData(normalized);
+      setActiveSessionId(normalized.sessions[0]?.sessionId ?? "");
+      setView("dashboard");
+      setTab("overview");
+    } catch (error) {
+      setDashboardError((error as Error).message);
+    }
+  }
+
+  async function tryLoadDefaultSessionList(): Promise<void> {
+    setSelectorError("");
+    try {
+      const response = await fetch("/session-list.json");
+      if (!response.ok) {
+        throw new Error("No default session-list.json found at web root");
+      }
+      const raw = (await response.json()) as unknown;
+      const normalized = normalizeSessionList(raw);
+      setSessionList(normalized);
+      setSelectedIds(new Set());
+    } catch (error) {
+      setSelectorError((error as Error).message);
+    }
+  }
+
+  function toggleSession(sessionId: string): void {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
+  }
+
+  function copyExportCommand(): void {
+    if (!generatedExportCommand) {
       return;
     }
-    setSelected(toInspectorEntry(getReplayEventAt(replayFrames, replayIndex)));
-  }, [replayFrames, replayIndex, replayMode]);
+    void navigator.clipboard.writeText(generatedExportCommand);
+  }
 
-  const displayedState = replayMode ? getReplayStateAt(replayFrames, replayIndex) : sessionState;
-  const lanes = mapStateToLanes(displayedState);
-  const timelineSource = replayMode ? replayEvents : allEvents;
-  const filteredEvents = applyFilter(timelineSource, filter);
-  const ganttRows = useMemo(() => buildGanttData(filteredEvents), [filteredEvents]);
-  const periodEvents = useMemo(() => {
-    if (!selectedPeriod) {
-      return filteredEvents;
-    }
-    return timelineSource.filter((ev) => {
-      const t = Date.parse(ev.timestamp);
-      return Number.isFinite(t) && t >= selectedPeriod.startTime && t <= selectedPeriod.endTime;
-    });
-  }, [filteredEvents, selectedPeriod, timelineSource]);
-  const sessionCompleted = displayedState.lifecycle === "completed";
-  const isIdle = displayedState.visualization === "idle" && !sessionCompleted;
+  function selectAllVisible(): void {
+    setSelectedIds(new Set(filteredCards.map((card) => card.sessionId)));
+  }
 
-  // Auto-scroll event list to bottom when new events arrive (skip if user scrolled up)
-  useEffect(() => {
-    if (replayMode || userScrolledRef.current) return;
-    const ul = eventListRef.current;
-    if (ul) {
-      ul.scrollTop = ul.scrollHeight;
-    }
-  }, [periodEvents.length, replayMode]);
-
-  const handleSelectEvent = useCallback((event: EventEnvelope) => {
-    setSelected({
-      eventId: event.eventId,
-      eventType: event.eventType,
-      timestamp: event.timestamp,
-      sessionId: event.sessionId,
-      turnId: event.turnId,
-      traceId: event.traceId,
-      spanId: event.spanId,
-      parentSpanId: event.parentSpanId,
-      payload: event.payload as Record<string, unknown>
-    });
-
-    if (replayMode) {
-      const index = replayFrames.findIndex((frame) => frame.event.eventId === event.eventId);
-      if (index >= 0) {
-        setReplayIndex(index);
-        setIsPlaying(false);
-      }
-    }
-  }, [replayFrames, replayMode]);
-
-  const handleReplayModeChange = useCallback((enabled: boolean) => {
-    setReplayMode(enabled);
-    setIsPlaying(false);
-    if (enabled && replayFrames.length > 0 && replayIndex < 0) {
-      setReplayIndex(0);
-    }
-  }, [replayFrames.length, replayIndex]);
-
-  const handlePlayPause = useCallback(() => {
-    setIsPlaying((current) => !current);
-  }, []);
-
-  const handleScrub = useCallback((index: number) => {
-    setReplayIndex(index);
-    setIsPlaying(false);
-  }, []);
-
-  const handleJumpToFailure = useCallback(() => {
-    if (firstFailureIndex >= 0) {
-      setReplayIndex(firstFailureIndex);
-      setIsPlaying(false);
-    }
-  }, [firstFailureIndex]);
-
-  const handleTogglePause = useCallback(() => {
-    setLivePaused((current) => {
-      if (current) {
-        // Resuming — flush any buffered state/events that arrived while paused
-        if (pausedStateRef.current) {
-          setSessionState(pausedStateRef.current);
-          pausedStateRef.current = null;
-        }
-        if (pausedEventsRef.current) {
-          setAllEvents(pausedEventsRef.current);
-          pausedEventsRef.current = null;
-        }
-      }
-      return !current;
-    });
-  }, []);
-
-  const handleExportCsv = useCallback(() => {
-    exportSessionToCsv(allEvents);
-  }, [allEvents]);
-
-  const handleSelectGanttSegment = useCallback((segment: GanttSegment) => {
-    const endTime = segment.endTime ?? Date.now();
-    setSelectedPeriod((current) => {
-      if (
-        current &&
-        current.startTime === segment.startTime &&
-        current.endTime === endTime &&
-        current.label === segment.label
-      ) {
-        return null;
-      }
-      return {
-        startTime: segment.startTime,
-        endTime,
-        label: segment.label,
-      };
-    });
-  }, []);
+  function clearSelected(): void {
+    setSelectedIds(new Set());
+  }
 
   return (
-    <main style={{ maxWidth: 1440, margin: "0 auto", padding: "1.5rem 2rem" }}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "1.5rem",
-          paddingBottom: "1rem",
-          borderBottom: "1px solid #334155",
-        }}
-      >
-        <h1 style={{ fontSize: "1.4rem", margin: 0, letterSpacing: "-0.01em" }}>
-          Copilot Activity Visualiser
-        </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-          {replayMode && (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "#f59e0b",
-                background: "rgba(245, 158, 11, 0.12)",
-                border: "1px solid rgba(245, 158, 11, 0.3)",
-                borderRadius: 6,
-                padding: "0.2rem 0.6rem",
-              }}
-            >
-              🔄 Replay Mode
-            </span>
-          )}
-          {livePaused && (
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "#f59e0b",
-                background: "rgba(245, 158, 11, 0.12)",
-                border: "1px solid rgba(245, 158, 11, 0.3)",
-                borderRadius: 6,
-                padding: "0.2rem 0.6rem",
-              }}
-            >
-              ⏸ Paused
-            </span>
-          )}
-          <button
-            onClick={handleTogglePause}
-            disabled={replayMode}
-            aria-label={livePaused ? "Resume live feed" : "Pause live feed"}
-            title={livePaused ? "Resume live feed (catch up on missed events)" : "Pause live feed"}
-            style={{
-              background: livePaused ? "#22c55e" : "#334155",
-              color: "#f1f5f9",
-              border: `1px solid ${livePaused ? "#22c55e" : "#475569"}`,
-              borderRadius: 6,
-              padding: "0.3rem 0.75rem",
-              fontSize: "0.82rem",
-              cursor: replayMode ? "not-allowed" : "pointer",
-              opacity: replayMode ? 0.5 : 1,
-            }}
-          >
-            {livePaused ? "▶ Resume" : "⏸ Pause"}
+    <main className="dashboard-shell">
+      <header className="app-header">
+        <h1>Copilot Session Explorer</h1>
+        <div className="header-actions">
+          <button type="button" onClick={() => setView("selector")} disabled={view === "selector"}>
+            Session Selector
           </button>
-          <button
-            onClick={handleExportCsv}
-            disabled={allEvents.length === 0}
-            aria-label="Export session data to CSV"
-            title="Export all session events to a CSV file"
-            style={{
-              background: "#334155",
-              color: "#f1f5f9",
-              border: "1px solid #475569",
-              borderRadius: 6,
-              padding: "0.3rem 0.75rem",
-              fontSize: "0.82rem",
-              cursor: allEvents.length === 0 ? "not-allowed" : "pointer",
-              opacity: allEvents.length === 0 ? 0.5 : 1,
-            }}
-          >
-            📥 Export CSV
+          <button type="button" onClick={() => setView("dashboard")} disabled={view === "dashboard"}>
+            Session Dashboard
           </button>
-          <span
-            aria-live="polite"
-            role="status"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: "0.85rem",
-              color: connected ? "#22c55e" : "#f59e0b",
-            }}
-          >
-            <span
-              style={{
-                display: "inline-block",
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                background: connected ? "#22c55e" : "#f59e0b",
-              }}
-            />
-            {connected ? "Connected" : "Connecting…"}
-          </span>
         </div>
       </header>
 
-      {/* Gantt Chart - visual centerpiece */}
-      <div style={{ marginBottom: "1rem" }}>
-        <PairingDiagnosticsPanel ingestBase={INGEST_BASE} />
-      </div>
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h2 style={{ fontSize: "1rem", marginBottom: "0.75rem", color: "#94a3b8", fontWeight: 500 }}>
-          Timeline
-        </h2>
-        <GanttChart
-          rows={ganttRows}
-          sessionCompleted={sessionCompleted}
-          isIdle={isIdle}
-          onSegmentSelect={handleSelectGanttSegment}
-          selectedPeriod={selectedPeriod}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: "1.5rem" }}>
-        {/* Left column */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Live Board */}
-          <div
-            style={{
-              background: "#1e293b",
-              borderRadius: 10,
-              border: "1px solid #475569",
-              padding: "1rem 1.25rem",
-              marginBottom: "1rem",
-            }}
-          >
-            <LiveBoard lanes={lanes} />
-          </div>
-
-          {/* Replay Controls */}
-          <div
-            style={{
-              background: "#1e293b",
-              borderRadius: 10,
-              border: "1px solid #475569",
-              padding: "1rem 1.25rem",
-              marginBottom: "1rem",
-            }}
-          >
-            <ReplayControls
-              canReplay={replayFrames.length > 0}
-              isReplayMode={replayMode}
-              isPlaying={isPlaying}
-              currentIndex={replayIndex}
-              maxIndex={replayFrames.length - 1}
-              speed={replaySpeed}
-              firstFailureIndex={firstFailureIndex}
-              onReplayModeChange={handleReplayModeChange}
-              onPlayPause={handlePlayPause}
-              onScrub={handleScrub}
-              onSpeedChange={setReplaySpeed}
-              onJumpToFailure={handleJumpToFailure}
+      {view === "selector" ? (
+        <section>
+          <div className="toolbar-row">
+            <button type="button" onClick={() => void tryLoadDefaultSessionList()}>
+              Load /session-list.json
+            </button>
+            <label className="file-input-label">
+              Load Session List JSON
+              <input
+                type="file"
+                accept="application/json"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void handleLoadSessionList(file);
+                  }
+                }}
+              />
+            </label>
+            <input
+              type="text"
+              value={sessionSearch}
+              onChange={(event) => setSessionSearch(event.target.value)}
+              placeholder="Search repository, session ID, event count, size"
+              className="search-input"
             />
+            <div className="sort-controls">
+              <button type="button" onClick={() => setSortMode("recent")} disabled={sortMode === "recent"}>
+                Recent First
+              </button>
+              <button type="button" onClick={() => setSortMode("events")} disabled={sortMode === "events"}>
+                Most Events
+              </button>
+              <button type="button" onClick={() => setSortMode("size")} disabled={sortMode === "size"}>
+                Largest
+              </button>
+            </div>
+            <button type="button" onClick={selectAllVisible}>
+              Select All
+            </button>
+            <button type="button" onClick={clearSelected}>
+              Clear
+            </button>
           </div>
 
-          {/* Filter Controls */}
-          <div
-            style={{
-              background: "#1e293b",
-              borderRadius: 10,
-              border: "1px solid #475569",
-              padding: "1rem 1.25rem",
-              marginBottom: "1rem",
-            }}
-          >
-            <FilterControls filter={filter} onChange={setFilter} />
+          {selectorError ? <p className="error-text">{selectorError}</p> : null}
+
+          <div className="card-grid">
+            {filteredCards.map((card) => {
+              const checked = selectedIds.has(card.sessionId);
+              return (
+                <article key={card.sessionId} className={`session-card${checked ? " selected" : ""}`}>
+                  <label className="checkbox-wrap">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSession(card.sessionId)}
+                    />
+                    <span>{card.repository}</span>
+                  </label>
+                  <p className="mono">{card.sessionId}</p>
+                  <dl>
+                    <dt>Events</dt>
+                    <dd>{card.eventCount.toLocaleString()}</dd>
+                    <dt>Size</dt>
+                    <dd>{formatBytes(card.fileSizeBytes)}</dd>
+                    <dt>Modified</dt>
+                    <dd>{formatDate(card.modifiedAt)}</dd>
+                    <dt>Branch</dt>
+                    <dd>{card.branch}</dd>
+                  </dl>
+                  <p>{card.summary}</p>
+                </article>
+              );
+            })}
           </div>
 
-          {/* Event list */}
-          <section
-            aria-label="Event timeline"
-            style={{
-              background: "#1e293b",
-              borderRadius: 10,
-              border: "1px solid #475569",
-              padding: "1rem 1.25rem",
-            }}
-          >
-            <h2 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>
-              Events ({periodEvents.length})
-            </h2>
-            {selectedPeriod && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: "0.5rem" }}>
-                <span style={{ fontSize: "0.8rem", color: "#94a3b8" }}>
-                  Related to selected bar: {selectedPeriod.label}
-                  {" "}
-                  <span style={{ color: "#64748b" }}>
-                    ({formatRangeTime(selectedPeriod.startTime)} - {formatRangeTime(selectedPeriod.endTime)})
-                  </span>
-                </span>
-                <button
-                  onClick={() => setSelectedPeriod(null)}
-                  style={{
-                    background: "#334155",
-                    color: "#e2e8f0",
-                    border: "1px solid #475569",
-                    borderRadius: 6,
-                    padding: "0.15rem 0.45rem",
-                    fontSize: "0.75rem",
-                    cursor: "pointer",
-                  }}
-                >
-                  Clear
+          {selectedSummary.count > 0 ? (
+            <aside className="summary-box">
+              <p>
+                Selected {selectedSummary.count} session(s) | {selectedSummary.events.toLocaleString()} events | {" "}
+                {formatBytes(selectedSummary.size)}
+              </p>
+              <pre>{generatedExportCommand}</pre>
+              <div className="summary-actions">
+                <button type="button" onClick={copyExportCommand}>
+                  Export Selected
+                </button>
+                <button type="button" onClick={() => setView("dashboard")}>
+                  View in Dashboard
                 </button>
               </div>
-            )}
-            <ul
-              ref={eventListRef}
-              onScroll={(e) => {
-                const el = e.currentTarget;
-                // User has scrolled up if not near the bottom
-                userScrolledRef.current =
-                  el.scrollHeight - el.scrollTop - el.clientHeight > AUTO_SCROLL_THRESHOLD;
-              }}
-              style={{ listStyle: "none", padding: 0, margin: 0, maxHeight: 400, overflowY: "auto" }}
-            >
-              {periodEvents.map((ev) => (
-                <li key={ev.eventId}>
+            </aside>
+          ) : null}
+        </section>
+      ) : (
+        <section className="dashboard-layout">
+          <aside className="sidebar">
+            <h2>Sessions</h2>
+            <label className="file-input-label">
+              Load Export JSON
+              <input
+                type="file"
+                accept="application/json"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) {
+                    void handleLoadExport(file);
+                  }
+                }}
+              />
+            </label>
+            <input
+              className="search-input"
+              placeholder="Filter summary, repository, branch"
+              value={dashboardFilter}
+              onChange={(event) => setDashboardFilter(event.target.value)}
+            />
+            {dashboardError ? <p className="error-text">{dashboardError}</p> : null}
+            <ul className="session-list">
+              {dashboardSessions.map((session) => (
+                <li key={session.sessionId}>
                   <button
-                    onClick={() => handleSelectEvent(ev)}
-                    aria-label={`Inspect ${ev.eventType} event at ${ev.timestamp}`}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      borderBottom: "1px solid #334155",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      width: "100%",
-                      padding: "0.5rem 0.25rem",
-                      color: "#f1f5f9",
-                      display: "flex",
-                      gap: "0.5rem",
-                      alignItems: "center",
-                    }}
+                    type="button"
+                    className={session.sessionId === activeSession?.sessionId ? "session-item active" : "session-item"}
+                    onClick={() => setActiveSessionId(session.sessionId)}
                   >
-                    <span
-                      style={{
-                        display: "inline-block",
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        flexShrink: 0,
-                        background: EVENT_TYPE_COLORS[ev.eventType] ?? DEFAULT_EVENT_COLOR,
-                      }}
-                    />
-                    <strong style={{ fontSize: "0.85rem" }}>{ev.eventType}</strong>
-                    <span style={{ color: "#94a3b8", fontSize: "0.8rem", marginLeft: "auto" }}>
-                      {new Date(ev.timestamp).toLocaleTimeString()}
-                    </span>
+                    <strong>{session.repository}</strong>
+                    <span>{session.branch}</span>
+                    <small className="mono">{session.sessionId}</small>
                   </button>
                 </li>
               ))}
             </ul>
-          </section>
-        </div>
+          </aside>
 
-        {/* Right column - Inspector */}
-        <div style={{ width: 340, flexShrink: 0 }}>
-          <EventInspector entry={selected} />
-        </div>
-      </div>
+          <article className="content-panel">
+            {!activeSession ? (
+              <p>Load an export file to inspect sessions.</p>
+            ) : (
+              <>
+                <header className="content-header">
+                  <div>
+                    <h2>{activeSession.summary}</h2>
+                    <p>
+                      {activeSession.repository} | {activeSession.branch} | {activeSession.sessionId}
+                    </p>
+                  </div>
+                  <div className="tab-row">
+                    {TAB_LABELS.map((tabItem) => (
+                      <button
+                        key={tabItem.id}
+                        type="button"
+                        onClick={() => setTab(tabItem.id)}
+                        disabled={tabItem.id === tab}
+                      >
+                        {tabItem.label}
+                      </button>
+                    ))}
+                  </div>
+                </header>
+
+                {tab === "overview" ? (
+                  <section className="tab-panel">
+                    <dl className="overview-grid">
+                      <dt>Created</dt>
+                      <dd>{formatDate(activeSession.createdAt)}</dd>
+                      <dt>Updated</dt>
+                      <dd>{formatDate(activeSession.updatedAt)}</dd>
+                      <dt>Repository</dt>
+                      <dd>{activeSession.repository}</dd>
+                      <dt>Branch</dt>
+                      <dd>{activeSession.branch}</dd>
+                      <dt>Host Type</dt>
+                      <dd>{activeSession.hostType}</dd>
+                      <dt>Working Dir</dt>
+                      <dd className="mono">{activeSession.cwd || "n/a"}</dd>
+                      <dt>Events</dt>
+                      <dd>{activeSession.stats.eventCount.toLocaleString()}</dd>
+                      <dt>Approx Size</dt>
+                      <dd>{formatBytes(activeSession.stats.fileSizeBytes)}</dd>
+                    </dl>
+                  </section>
+                ) : null}
+
+                {tab === "checkpoints" ? (
+                  <section className="tab-panel">
+                    {activeSession.checkpoints.length === 0 ? <p>No checkpoints found.</p> : null}
+                    {activeSession.checkpoints.map((checkpoint, index) => (
+                      <article key={`${checkpoint.id ?? index}`} className="list-card">
+                        <h3>
+                          #{String(checkpoint.checkpoint_number ?? index + 1)} {String(checkpoint.title ?? "Untitled")}
+                        </h3>
+                        <p>{String(checkpoint.overview ?? "")}</p>
+                        <p>{String(checkpoint.work_done ?? "")}</p>
+                        <p>{String(checkpoint.next_steps ?? "")}</p>
+                      </article>
+                    ))}
+                  </section>
+                ) : null}
+
+                {tab === "turns" ? (
+                  <section className="tab-panel">
+                    {activeSession.turns.length === 0 ? <p>No turns found.</p> : null}
+                    {activeSession.turns.map((turn, index) => {
+                      const enrichment = activeSession.turnEnrichments?.[index];
+                      const hasActivity =
+                        enrichment &&
+                        (enrichment.tools.length > 0 ||
+                          enrichment.skills.length > 0 ||
+                          enrichment.agents.length > 0);
+                      return (
+                        <article key={`${turn.id ?? index}`} className="turn-card">
+                          {/* ── Header ── */}
+                          <div className="turn-header">
+                            <strong>Turn #{String(turn.turn_index ?? index + 1)}</strong>
+                            {enrichment?.model ? (
+                              <span className="turn-model-badge">{enrichment.model}</span>
+                            ) : null}
+                            {enrichment?.outputTokens ? (
+                              <span className="turn-token-badge">
+                                {enrichment.outputTokens.toLocaleString()} out tokens
+                              </span>
+                            ) : null}
+                            {hasActivity ? (
+                              <span className="turn-token-badge">
+                                {enrichment.tools.length > 0
+                                  ? `${enrichment.tools.length} tool${enrichment.tools.length > 1 ? "s" : ""}`
+                                  : null}
+                                {enrichment.tools.length > 0 && enrichment.skills.length > 0 ? " · " : null}
+                                {enrichment.skills.length > 0
+                                  ? `${enrichment.skills.length} skill${enrichment.skills.length > 1 ? "s" : ""}`
+                                  : null}
+                                {(enrichment.tools.length > 0 || enrichment.skills.length > 0) &&
+                                enrichment.agents.length > 0
+                                  ? " · "
+                                  : null}
+                                {enrichment.agents.length > 0
+                                  ? `${enrichment.agents.length} agent${enrichment.agents.length > 1 ? "s" : ""}`
+                                  : null}
+                              </span>
+                            ) : null}
+                            <span className="turn-token-badge" style={{ marginLeft: "auto" }}>
+                              {formatDate(String(turn.timestamp ?? ""))}
+                            </span>
+                          </div>
+
+                          <div className="turn-body">
+                            {/* ── User message ── */}
+                            {turn.user_message ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">User</div>
+                                <p className="turn-message">{String(turn.user_message)}</p>
+                              </div>
+                            ) : null}
+
+                            {/* ── Activity: tools, skills, agents ── */}
+                            {hasActivity ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">Activity</div>
+                                <div className="turn-activity">
+                                  {enrichment.tools.map((tool, ti) => (
+                                    <div key={ti} className="tool-item">
+                                      <div className="tool-item-header">
+                                        <span className="tool-name-badge">{tool.toolName}</span>
+                                        {tool.success === true ? (
+                                          <span className="tool-success">✓</span>
+                                        ) : tool.success === false ? (
+                                          <span className="tool-failure">✗</span>
+                                        ) : null}
+                                        {tool.intentionSummary ? (
+                                          <span className="tool-intention">{tool.intentionSummary}</span>
+                                        ) : null}
+                                      </div>
+                                      {tool.arguments && Object.keys(tool.arguments).length > 0 ? (
+                                        <div className="tool-args">
+                                          {Object.entries(tool.arguments)
+                                            .filter(([, v]) => v.length <= 120)
+                                            .slice(0, 5)
+                                            .map(([k, v]) => (
+                                              <span key={k} className="tool-arg-pair">
+                                                <strong>{k}:</strong> {v}
+                                              </span>
+                                            ))}
+                                        </div>
+                                      ) : null}
+                                      {tool.resultSummary ? (
+                                        <pre className="tool-result">{tool.resultSummary}</pre>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  {enrichment.agents.map((agent, ai) => (
+                                    <div key={ai} className="agent-item">
+                                      <span className="agent-pill">{agent.agentName}</span>
+                                      {agent.task ? (
+                                        <span className="agent-task">{agent.task}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  {enrichment.skills.map((skill, si) => (
+                                    <div key={si} className="skill-item">
+                                      <span className="skill-pill">{skill.name}</span>
+                                      {skill.description ? (
+                                        <span className="skill-description">{skill.description}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {/* ── Assistant response ── */}
+                            {turn.assistant_response ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">Assistant</div>
+                                <p className="turn-message">{String(turn.assistant_response)}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </section>
+                ) : null}
+
+                {tab === "files" ? (
+                  <section className="tab-panel">
+                    {activeSession.files.length === 0 ? <p>No file records found.</p> : null}
+                    <ul className="files-list">
+                      {activeSession.files.map((file, index) => (
+                        <li key={`${file.id ?? index}`}>
+                          <span className="mono">{String(file.file_path ?? "")}</span>
+                          <span>{String(file.tool_name ?? "unknown")}</span>
+                          <span>turn {String(file.turn_index ?? "n/a")}</span>
+                          <span>{formatDate(String(file.first_seen_at ?? ""))}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {tab === "models" ? (
+                  <section className="tab-panel">
+                    <h3>Detected Models</h3>
+                    {activeSession.modelsAndTokens.detectedModels.length === 0 ? (
+                      <p>No model IDs detected for this session.</p>
+                    ) : (
+                      <ul>
+                        {activeSession.modelsAndTokens.detectedModels.map((model) => (
+                          <li key={model} className="mono">{model}</li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <h3>Token Totals</h3>
+                    {activeSession.modelsAndTokens.totals ? (
+                      <ul>
+                        <li>Input: {activeSession.modelsAndTokens.totals.inputTokens.toLocaleString()}</li>
+                        <li>Output: {activeSession.modelsAndTokens.totals.outputTokens.toLocaleString()}</li>
+                        <li>Total: {activeSession.modelsAndTokens.totals.totalTokens.toLocaleString()}</li>
+                      </ul>
+                    ) : (
+                      <p>No aggregated token totals available.</p>
+                    )}
+
+                    <h3>Per-Model Usage</h3>
+                    {activeSession.modelsAndTokens.modelUsage && activeSession.modelsAndTokens.modelUsage.length > 0 ? (
+                      <ul>
+                        {activeSession.modelsAndTokens.modelUsage.map((entry) => (
+                          <li key={entry.model}>
+                            <span className="mono">{entry.model}</span>
+                            {" "}- events: {entry.eventCount.toLocaleString()}, input: {entry.inputTokens.toLocaleString()}, output: {entry.outputTokens.toLocaleString()}, total: {entry.totalTokens.toLocaleString()}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p>No per-model usage records available.</p>
+                    )}
+
+                    <h3>Model Change Timeline</h3>
+                    {activeSession.modelsAndTokens.modelChanges && activeSession.modelsAndTokens.modelChanges.length > 0 ? (
+                      <ol>
+                        {activeSession.modelsAndTokens.modelChanges.map((change, index) => (
+                          <li key={index}>
+                            {change.timestamp ? <span className="mono">[{change.timestamp}]</span> : null}
+                            {change.timestamp ? " " : null}
+                            <span className="mono">{change.oldModel}</span>
+                            {" \u2192 "}
+                            <span className="mono">{change.newModel}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p>No model changes recorded.</p>
+                    )}
+
+                    <h3>Reasoning Events</h3>
+                    {activeSession.modelsAndTokens.reasoningEvents && activeSession.modelsAndTokens.reasoningEvents.length > 0 ? (() => {
+                      const events = activeSession.modelsAndTokens.reasoningEvents!;
+                      const visible = events.slice(0, 50);
+                      const overflow = events.length - visible.length;
+                      return (
+                        <>
+                          {visible.map((event, index) => (
+                            <div key={index} className="reasoning-event">
+                              <div className="reasoning-event-meta">
+                                <span className="event-type-badge">{event.eventType}</span>
+                                {" "}
+                                <span className="mono">{event.model}</span>
+                                {" — "}
+                                in: {event.inputTokens.toLocaleString()}, out: {event.outputTokens.toLocaleString()}, total: {event.totalTokens.toLocaleString()}
+                                {event.timestamp ? <span className="reasoning-event-ts"> [{event.timestamp}]</span> : null}
+                              </div>
+                              {event.snippet ? (
+                                <blockquote className="reasoning-snippet">{event.snippet}</blockquote>
+                              ) : (
+                                <p className="reasoning-snippet-empty">(no text snippet available)</p>
+                              )}
+                            </div>
+                          ))}
+                          {overflow > 0 ? <p className="overflow-note">&hellip; and {overflow.toLocaleString()} more reasoning events not shown.</p> : null}
+                        </>
+                      );
+                    })() : (
+                      <p>No reasoning events with token usage recorded.</p>
+                    )}
+
+                    <h3>Token Mentions</h3>
+                    {activeSession.modelsAndTokens.tokenMentions.length === 0 ? (
+                      <p>No token mentions detected.</p>
+                    ) : (
+                      <ul>
+                        {activeSession.modelsAndTokens.tokenMentions.map((mention, index) => (
+                          <li key={`${mention.value}-${index}`}>
+                            {mention.value.toLocaleString()} tokens <span className="mono">{mention.source}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    <h3>Notes</h3>
+                    <ul>
+                      {activeSession.modelsAndTokens.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+
+                {tab === "search" ? (
+                  <section className="tab-panel">
+                    <input
+                      className="search-input"
+                      placeholder="Search all session content"
+                      value={contentSearch}
+                      onChange={(event) => setContentSearch(event.target.value)}
+                    />
+                    {!contentSearch.trim() ? <p>Type a query to search across turns, checkpoints, files, and indexed text.</p> : null}
+                    {contentSearch.trim() && searchMatches.length === 0 ? <p>No matches found.</p> : null}
+                    <ul className="search-results">
+                      {searchMatches.map((match, index) => (
+                        <li key={`${index}-${match.slice(0, 12)}`} className="mono">
+                          {match}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ) : null}
+              </>
+            )}
+          </article>
+        </section>
+      )}
     </main>
   );
 }

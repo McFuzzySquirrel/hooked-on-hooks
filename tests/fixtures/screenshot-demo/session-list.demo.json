@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-04-23T00:00:00.000Z",
+  "source": {
+    "type": "copilot-session-store-db",
+    "dbPath": "/demo/session-store.db"
+  },
+  "count": 2,
+  "sessions": [
+    {
+      "sessionId": "demo-session-001",
+      "repository": "demo-org/demo-repo-alpha",
+      "branch": "feature/demo-branch",
+      "summary": "Demo workflow session",
+      "eventCount": 42,
+      "fileSizeBytes": 32768,
+      "modifiedAt": "2026-04-23T00:00:00.000Z",
+      "createdAt": "2026-04-22T23:50:00.000Z"
+    },
+    {
+      "sessionId": "demo-session-002",
+      "repository": "demo-org/demo-repo-beta",
+      "branch": "main",
+      "summary": "Secondary demo session",
+      "eventCount": 18,
+      "fileSizeBytes": 16384,
+      "modifiedAt": "2026-04-22T22:10:00.000Z",
+      "createdAt": "2026-04-22T21:00:00.000Z"
+    }
+  ]
+}

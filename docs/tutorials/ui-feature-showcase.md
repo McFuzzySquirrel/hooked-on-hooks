@@ -29,6 +29,15 @@ Clicking a Gantt bar highlights the selected period and narrows the event list
 to records that occurred inside that window. This is the fastest way to pivot
 from a visual spike to the exact underlying events.
 
+## Parallel Tool Execution
+
+![Parallel tool batches collapsed in the Gantt timeline](./assets/tutorial-screenshots/ui-features/ui-gantt-parallel-tools.png)
+
+When multiple tools fire concurrently (common in multi-agent sessions), the
+Gantt chart collapses overlapping segments into parallel batch summaries. The
+state machine tracks all active tools simultaneously via `activeTools` rather
+than a single `currentTool`.
+
 ## Live Activity
 
 ![Live activity board](./assets/tutorial-screenshots/ui-features/ui-live-activity-board.png)

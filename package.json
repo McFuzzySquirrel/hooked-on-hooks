@@ -8,7 +8,7 @@
     "shared/*"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "scripts": {
     "build": "npm run --workspaces build",
@@ -18,15 +18,20 @@
     "smoke:e2e": "tsx scripts/smoke-e2e.ts",
     "serve:ingest": "tsx -e \"import { createIngestServer } from './packages/ingest-service/src/index.ts'; (async () => { const s = await createIngestServer(); await s.listen({ host: '127.0.0.1', port: 7070 }); console.log('INGEST_READY http://127.0.0.1:7070'); })();\"",
     "emit:event": "tsx scripts/emit-event-cli.ts",
+    "session:list": "tsx scripts/export-session-store.ts",
+    "session:export": "tsx scripts/export-session-store.ts",
     "bootstrap:repo": "tsx scripts/bootstrap-existing-repo.ts",
     "unbootstrap:repo": "tsx scripts/unbootstrap-existing-repo.ts",
     "replay:jsonl": "tsx scripts/replay-jsonl.ts",
+    "check:screenshot-safety": "tsx scripts/check-screenshot-safety.ts",
     "lint": "echo 'Lint config baseline in place'",
     "clean": "rm -rf coverage dist .tmp"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "playwright": "^1.59.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "vitest": "^4.0.2"

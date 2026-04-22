@@ -60,6 +60,7 @@ const PayloadSchemas = {
     agentName: z.string().min(1),
     agentDisplayName: z.string().optional(),
     agentDescription: z.string().optional(),
+    agentType: z.string().optional(),
     taskDescription: z.string().optional(),
     message: z.string().optional(),
     summary: z.string().optional()

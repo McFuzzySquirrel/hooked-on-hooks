@@ -67,6 +67,19 @@ This feature does not own UI components directly; it exposes state snapshots and
 
 See [Tracing Plan v2](../roadmap/tracing-plan.md) for design rationale and the phased rollout plan.
 
+### Phase 4: Multi-Agent Session Improvements
+- [x] Add `activeTools: Record<string, ToolInfo>` for concurrent tool tracking (keyed by `eventId`).
+- [x] Add `currentIntent: string | null` — extracted from `report_intent` tool calls.
+- [x] Add `turnCount: number` and `currentTurnStartTime: string | null` — incremented on `userPromptSubmitted`.
+- [x] Add `orphanedToolCount: number` — unmatched `preToolUse` events cleared on `sessionEnd`.
+- [x] Add `agentType: string | undefined` to `SubagentInfo` — extracted from `task` `toolArgs.agent_type`.
+- [x] Add `waiting_for_user` and `waiting_for_agent` to `VisualizationState` union.
+- [x] Implement `removeMatchingTool()` helper for tool pairing in reducer (toolCallId match → FIFO by toolName).
+- [x] Add `computeTimeBreakdown(events)` — returns tool/LLM/user/agent time split.
+- [x] Add `computeToolDistribution(events)` — returns per-tool count, total duration, avg duration.
+
+See [ADR-011](../adr/011-multi-agent-session-improvements.md) for design rationale.
+
 ---
 
 ## 6. Testing Strategy

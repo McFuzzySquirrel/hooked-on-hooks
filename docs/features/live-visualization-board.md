@@ -68,6 +68,15 @@
 ### Phase 2: Performance Validation
 - [x] Validate responsiveness under sustained event volume.
 
+### Phase 3: Multi-Agent Visualization
+- [x] Add `waiting_for_user` and `waiting_for_agent` visual states (distinct from idle).
+- [x] Update `vizToStatus()` mapping for new wait states.
+- [x] Display concurrent tool count and `agentType` in lane status via `mapStateToLanes()`.
+- [x] Collapse temporally overlapping tool segments into parallel batch summaries in `collapseRepeatedSegments()`.
+- [x] Add `detectParallelBatches()` for cross-row concurrency indicators in Gantt view.
+
+See [ADR-011](../adr/011-multi-agent-session-improvements.md) for design rationale.
+
 ---
 
 ## 6. Testing Strategy

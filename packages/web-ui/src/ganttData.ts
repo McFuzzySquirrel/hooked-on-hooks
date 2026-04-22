@@ -81,48 +81,99 @@ function agentNameFrom(payload: Record<string, unknown>): string {
 }
 
 /**
+ * Build a display label for a subagent, preferring agentType (the role) as
+ * primary and agentName (the task instance) as context detail.
+ */
+function agentLabelFrom(payload: Record<string, unknown>): string {
+  const agentType = typeof payload.agentType === "string" ? payload.agentType : undefined;
+  const taskName = agentNameFrom(payload);
+  if (agentType && agentType !== taskName) {
+    return `${agentType} (${taskName})`;
+  }
+  return taskName;
+}
+
+/**
+ * Return the agentType (role) from the payload when available, falling back
+ * to agentNameFrom for use as the tool-attribution context label.
+ */
+function agentContextFrom(payload: Record<string, unknown>): string {
+  if (typeof payload.agentType === "string") return payload.agentType;
+  return agentNameFrom(payload);
+}
+
+/**
  * R5: Collapse consecutive completed segments into summary groups when there
  * are more than COLLAPSE_THRESHOLD in a row. The returned `visible` array
  * contains only the segments that should render as individual bars; collapsed
  * runs are replaced by a single summary segment and collected in `groups`.
+ *
+ * P1-2: Also detects parallel batches — segments whose start times fall within
+ * PARALLEL_WINDOW_MS of each other — and collapses those into a single summary
+ * even if the batch is smaller than COLLAPSE_THRESHOLD.
  */
 const COLLAPSE_THRESHOLD = 3;
+const PARALLEL_WINDOW_MS = 3000;
 
 function collapseRepeatedSegments(segments: GanttSegment[]): {
   visible: GanttSegment[];
   groups: CollapsedGroup[];
 } {
-  if (segments.length <= COLLAPSE_THRESHOLD) {
+  if (segments.length <= 1) {
     return { visible: segments, groups: [] };
   }
 
+  // First pass: identify parallel batches (2+ segments that overlap temporally)
+  const parallelBatchIndices = new Set<number>();
+  const batches: number[][] = [];
+  let batchStart = 0;
+
+  while (batchStart < segments.length) {
+    if (segments[batchStart].endTime === null) {
+      batchStart++;
+      continue;
+    }
+    // Find segments that overlap with the anchor segment
+    const anchorEnd = segments[batchStart].endTime!;
+    let batchEnd = batchStart + 1;
+    while (
+      batchEnd < segments.length &&
+      segments[batchEnd].endTime !== null &&
+      segments[batchEnd].startTime < anchorEnd // actual temporal overlap
+    ) {
+      batchEnd++;
+    }
+    const batchSize = batchEnd - batchStart;
+    if (batchSize >= 2) {
+      const batch: number[] = [];
+      for (let i = batchStart; i < batchEnd; i++) {
+        parallelBatchIndices.add(i);
+        batch.push(i);
+      }
+      batches.push(batch);
+      batchStart = batchEnd;
+    } else {
+      batchStart++;
+    }
+  }
+
+  // Second pass: collapse consecutive completed runs AND parallel batches
   const visible: GanttSegment[] = [];
   const groups: CollapsedGroup[] = [];
-  let runStart = 0;
+  let i = 0;
 
-  while (runStart < segments.length) {
-    // Find the end of a consecutive run of completed (non-running) segments
-    let runEnd = runStart;
-    while (
-      runEnd < segments.length &&
-      segments[runEnd].endTime !== null &&
-      segments[runEnd].status !== "running"
-    ) {
-      runEnd++;
-    }
-
-    const runLength = runEnd - runStart;
-    if (runLength > COLLAPSE_THRESHOLD) {
-      // Collapse this run into a summary
-      const children = segments.slice(runStart, runEnd);
+  while (i < segments.length) {
+    // Check if this index starts a parallel batch
+    const batch = batches.find((b) => b[0] === i);
+    if (batch) {
+      const children = batch.map((idx) => segments[idx]);
       const totalMs = children.reduce((sum, s) => {
-        const dur = (s.endTime ?? s.startTime) - s.startTime;
-        return sum + dur;
+        return sum + ((s.endTime ?? s.startTime) - s.startTime);
       }, 0);
       const group: CollapsedGroup = {
         id: `collapsed-${children[0].id}`,
-        label: `${runLength}× ${children[0].label} (${formatDurationShort(totalMs)})`,
-        count: runLength,
+        label: `${children.length}× ${children[0].label} (${formatDurationShort(totalMs)})`,
+        count: children.length,
         totalDurationMs: totalMs,
         startTime: children[0].startTime,
         endTime: children[children.length - 1].endTime ?? children[children.length - 1].startTime,
@@ -130,7 +181,6 @@ function collapseRepeatedSegments(segments: GanttSegment[]): {
         children,
       };
       groups.push(group);
-      // Add a single summary segment to visible
       visible.push({
         id: group.id,
         label: group.label,
@@ -139,22 +189,58 @@ function collapseRepeatedSegments(segments: GanttSegment[]): {
         endTime: group.endTime,
         status: "succeeded",
         eventType: "collapsed",
-        details: { count: runLength, totalDurationMs: totalMs },
+        details: { count: children.length, totalDurationMs: totalMs, parallel: true },
       });
-    } else {
-      // Not enough to collapse — keep individual segments
-      for (let i = runStart; i < runEnd; i++) {
-        visible.push(segments[i]);
+      i = batch[batch.length - 1] + 1;
+      continue;
+    }
+
+    // Not part of a parallel batch — check for consecutive completed run
+    if (segments[i].endTime !== null && segments[i].status !== "running") {
+      let runEnd = i;
+      while (
+        runEnd < segments.length &&
+        segments[runEnd].endTime !== null &&
+        segments[runEnd].status !== "running" &&
+        !parallelBatchIndices.has(runEnd)
+      ) {
+        runEnd++;
+      }
+      const runLength = runEnd - i;
+      if (runLength > COLLAPSE_THRESHOLD) {
+        const children = segments.slice(i, runEnd);
+        const totalMs = children.reduce((sum, s) => {
+          return sum + ((s.endTime ?? s.startTime) - s.startTime);
+        }, 0);
+        const group: CollapsedGroup = {
+          id: `collapsed-${children[0].id}`,
+          label: `${runLength}× ${children[0].label} (${formatDurationShort(totalMs)})`,
+          count: runLength,
+          totalDurationMs: totalMs,
+          startTime: children[0].startTime,
+          endTime: children[children.length - 1].endTime ?? children[children.length - 1].startTime,
+          category: children[0].category,
+          children,
+        };
+        groups.push(group);
+        visible.push({
+          id: group.id,
+          label: group.label,
+          category: group.category,
+          startTime: group.startTime,
+          endTime: group.endTime,
+          status: "succeeded",
+          eventType: "collapsed",
+          details: { count: runLength, totalDurationMs: totalMs },
+        });
+        i = runEnd;
+        continue;
       }
     }
 
-    // Push any running/non-completed segments that broke the run.
-    // Check endTime === null (the canonical "still open" indicator).
-    if (runEnd < segments.length && segments[runEnd].endTime === null) {
-      visible.push(segments[runEnd]);
-      runEnd++;
-    }
-    runStart = runEnd;
+    // Single segment — keep as-is
+    visible.push(segments[i]);
+    i++;
   }
 
   return { visible, groups };
@@ -180,6 +266,12 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
   let openSession: GanttSegment | null = null;
   const openTools = new Map<string, GanttSegment>();
   const openSubagents = new Map<string, GanttSegment>();
+
+  // Track which agent context is active so tools can be attributed
+  let activeAgentContext: string | null = null;
+  // Map from tool name → actual row key used at preToolUse time, so postToolUse
+  // can find the correct row even if the agent context changed in between.
+  const toolRowKeyByName = new Map<string, string>();
 
   // Track idle gap starts for session-level idle visualization
   let idleGapStart: number | null = null;
@@ -262,10 +354,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       case "preToolUse": {
         closeIdleGap(t);
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = activeAgentContext
+          ? `tool:${activeAgentContext}:${name}`
+          : `tool:${name}`;
 
-        // R4: Auto-close any still-open segment for the same tool name.
-        // This prevents orphaned bars when a postToolUse never arrives.
+        // R4: Auto-close any still-open segment for the same tool row.
         const prevOpen = openTools.get(rowKey);
         if (prevOpen && prevOpen.endTime === null) {
           prevOpen.endTime = t;
@@ -275,7 +368,9 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
 
         const seg: GanttSegment = {
           id: ev.eventId,
-          label: `Tool: ${name}`,
+          label: activeAgentContext
+            ? `Tool: ${name} (${activeAgentContext})`
+            : `Tool: ${name}`,
           category: "tool",
           startTime: t,
           endTime: null,
@@ -284,6 +379,7 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
           details: payload,
         };
         openTools.set(rowKey, seg);
+        toolRowKeyByName.set(name, rowKey);
         if (!toolRows.has(rowKey)) {
           toolRows.set(rowKey, []);
         }
@@ -292,13 +388,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "postToolUse": {
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = toolRowKeyByName.get(name)
+          ?? (activeAgentContext ? `tool:${activeAgentContext}:${name}` : `tool:${name}`);
         const open = openTools.get(rowKey);
         if (open) {
           open.endTime = t;
           open.status = "succeeded";
             open.details = { ...open.details, ...withoutUndefined(payload) };
           openTools.delete(rowKey);
+          toolRowKeyByName.delete(name);
         }
         // Start idle gap after tool completes
         idleGapStart = t;
@@ -306,13 +404,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "postToolUseFailure": {
         const name = toolNameFrom(payload);
-        const rowKey = `tool:${name}`;
+        const rowKey = toolRowKeyByName.get(name)
+          ?? (activeAgentContext ? `tool:${activeAgentContext}:${name}` : `tool:${name}`);
         const open = openTools.get(rowKey);
         if (open) {
           open.endTime = t;
           open.status = "failed";
             open.details = { ...open.details, ...withoutUndefined(payload) };
           openTools.delete(rowKey);
+          toolRowKeyByName.delete(name);
         }
         // Start idle gap after tool failure
         idleGapStart = t;
@@ -323,10 +423,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       case "subagentStart": {
         closeIdleGap(t);
         const name = agentNameFrom(payload);
+        activeAgentContext = agentContextFrom(payload);
         const rowKey = `subagent:${name}`;
         const seg: GanttSegment = {
           id: ev.eventId,
-          label: `Agent: ${name}`,
+          label: `Agent: ${agentLabelFrom(payload)}`,
           category: "subagent",
           startTime: t,
           endTime: null,
@@ -343,6 +444,7 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
       }
       case "subagentStop": {
         const name = agentNameFrom(payload);
+        activeAgentContext = null;
         const rowKey = `subagent:${name}`;
         const open = openSubagents.get(rowKey);
         if (open) {
@@ -443,11 +545,15 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
     a[0].localeCompare(b[0])
   );
   for (const [rowKey, segments] of toolEntries) {
-    const name = rowKey.replace(/^tool:/, "");
+    // Row keys: "tool:name" (session-level) or "tool:agent:name" (agent-attributed)
+    const parts = rowKey.replace(/^tool:/, "").split(":");
+    const label = parts.length > 1
+      ? `Tool: ${parts[parts.length - 1]} (${parts.slice(0, -1).join(":")})`
+      : `Tool: ${parts[0]}`;
     const { visible, groups } = collapseRepeatedSegments(segments);
     rows.push({
       rowId: rowKey,
-      label: `Tool: ${name}`,
+      label,
       segments: visible,
       collapsedGroups: groups.length > 0 ? groups : undefined,
     });
@@ -458,10 +564,11 @@ export function buildGanttData(events: EventEnvelope[]): GanttRow[] {
     a[0].localeCompare(b[0])
   );
   for (const [rowKey, segments] of subEntries) {
-    const name = rowKey.replace(/^subagent:/, "");
+    // Use the label from the first segment (computed with agentLabelFrom at start)
+    const displayLabel = segments[0]?.label ?? `Agent: ${rowKey.replace(/^subagent:/, "")}`;
     rows.push({
       rowId: rowKey,
-      label: `Agent: ${name}`,
+      label: displayLabel,
       segments,
     });
   }
@@ -512,4 +619,78 @@ export function findLatestRunningSegmentId(rows: GanttRow[]): string | null {
   }
 
   return latestId;
+}
+
+/* ------------------------------------------------------------------ */
+/*  P2-3: Parallel execution detection                                 */
+/* ------------------------------------------------------------------ */
+
+export interface ParallelBatch {
+  id: string;
+  /** Row IDs of the segments that overlap. */
+  rowIds: string[];
+  /** Segment IDs of the overlapping segments. */
+  segmentIds: string[];
+  startTime: number;
+  endTime: number;
+  concurrency: number;
+}
+
+/**
+ * Detect segments across different rows that overlap temporally, indicating
+ * parallel tool execution. Returns batch descriptors that the UI can use to
+ * render bracket indicators or concurrency labels.
+ */
+export function detectParallelBatches(rows: GanttRow[]): ParallelBatch[] {
+  // Gather all concrete segments (not collapsed, not session/prompt/error markers)
+  const allSegments: Array<{ rowId: string; seg: GanttSegment }> = [];
+  for (const row of rows) {
+    if (row.rowId === "session") continue;
+    for (const seg of row.segments) {
+      if (seg.eventType === "collapsed" || seg.endTime === null) continue;
+      if (seg.startTime === seg.endTime) continue; // point-in-time
+      allSegments.push({ rowId: row.rowId, seg });
+    }
+  }
+
+  if (allSegments.length < 2) return [];
+
+  // Sort by start time
+  allSegments.sort((a, b) => a.seg.startTime - b.seg.startTime);
+
+  const batches: ParallelBatch[] = [];
+  const used = new Set<string>();
+  let batchSeq = 0;
+
+  for (let i = 0; i < allSegments.length; i++) {
+    if (used.has(allSegments[i].seg.id)) continue;
+    const anchor = allSegments[i];
+    const anchorEnd = anchor.seg.endTime!;
+    const members = [anchor];
+
+    for (let j = i + 1; j < allSegments.length; j++) {
+      if (used.has(allSegments[j].seg.id)) continue;
+      const candidate = allSegments[j];
+      if (candidate.seg.startTime >= anchorEnd) break;
+      // Overlaps with anchor — different row required for cross-row parallelism
+      if (candidate.rowId !== anchor.rowId) {
+        members.push(candidate);
+      }
+    }
+
+    if (members.length >= 2) {
+      const batchEnd = Math.max(...members.map((m) => m.seg.endTime!));
+      batches.push({
+        id: `parallel-batch-${++batchSeq}`,
+        rowIds: members.map((m) => m.rowId),
+        segmentIds: members.map((m) => m.seg.id),
+        startTime: anchor.seg.startTime,
+        endTime: batchEnd,
+        concurrency: members.length,
+      });
+      for (const m of members) used.add(m.seg.id);
+    }
+  }
+
+  return batches;
 }

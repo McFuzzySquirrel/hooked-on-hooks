@@ -8,11 +8,13 @@ import type { LaneData, VisualStatus } from "./types.js";
  */
 export function vizToStatus(viz: VisualizationState): VisualStatus {
   switch (viz) {
-    case "idle":            return "idle";
-    case "tool_running":    return "running";
-    case "tool_succeeded":  return "succeeded";
-    case "subagent_running": return "subagent_running";
-    case "error":           return "error";
+    case "idle":               return "idle";
+    case "tool_running":       return "running";
+    case "tool_succeeded":     return "succeeded";
+    case "subagent_running":   return "subagent_running";
+    case "waiting_for_user":   return "running";
+    case "waiting_for_agent":  return "running";
+    case "error":              return "error";
     default: {
       // Exhaustiveness guard: fails compilation if a new VisualizationState is
       // added without updating this mapping.
@@ -51,14 +53,21 @@ export function mapStateToLanes(state: SessionState): LaneData[] {
 
   // --- Tool lane (rendered when a tool is active or last completed) ---
   if (state.currentTool) {
+    const activeCount = Object.keys(state.activeTools).length;
     const toolStatus: VisualStatus =
-      state.visualization === "tool_running"   ? "running" :
-      state.visualization === "tool_succeeded" ? "succeeded" :
-      state.visualization === "error"          ? "error" : "idle";
+      state.visualization === "tool_running"      ? "running" :
+      state.visualization === "waiting_for_user"   ? "running" :
+      state.visualization === "waiting_for_agent"  ? "running" :
+      state.visualization === "tool_succeeded"     ? "succeeded" :
+      state.visualization === "error"              ? "error" : "idle";
+
+    const toolLabel = activeCount > 1
+      ? `Tools: ${state.currentTool.toolName} (+${activeCount - 1} more)`
+      : `Tool: ${state.currentTool.toolName}`;
 
     lanes.push({
       id: "tool",
-      label: `Tool: ${state.currentTool.toolName}`,
+      label: toolLabel,
       status: toolStatus,
       details: state.currentTool.errorSummary
     });
@@ -66,9 +75,17 @@ export function mapStateToLanes(state: SessionState): LaneData[] {
 
   // --- Subagent lane (rendered while a subagent is active) ---
   if (state.activeSubagent) {
+    // agentType is the actual agent role (e.g. "ui-hud-developer")
+    // agentName is the task instance name (e.g. "f2-responsive-layout")
+    const agentRole = state.activeSubagent.agentType;
+    const taskName = state.activeSubagent.agentDisplayName ?? state.activeSubagent.agentName;
+    const label = agentRole && agentRole !== taskName
+      ? `Agent: ${agentRole} (${taskName})`
+      : `Agent: ${taskName}`;
+
     lanes.push({
       id: "subagent",
-      label: `Agent: ${state.activeSubagent.agentDisplayName ?? state.activeSubagent.agentName}`,
+      label,
       status: "subagent_running",
       details:
         state.activeSubagent.agentDescription

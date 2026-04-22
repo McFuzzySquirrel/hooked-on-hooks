@@ -78,6 +78,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 interface TaskAgentInfo {
   agentName: string;
+  agentType?: string;
   taskDescription?: string;
   message?: string;
   summary?: string;
@@ -104,7 +105,8 @@ function extractTaskAgentInfo(event: EventEnvelope): TaskAgentInfo | null {
 
   const agentType = typeof toolArgs.agent_type === "string" ? toolArgs.agent_type : undefined;
   const taskName = typeof toolArgs.name === "string" ? toolArgs.name : undefined;
-  const agentName = agentType ?? taskName;
+  // Use taskName as the instance label; fall back to agentType if no name
+  const agentName = taskName ?? agentType;
   if (!agentName || agentName.trim().length === 0) {
     return null;
   }
@@ -113,6 +115,7 @@ function extractTaskAgentInfo(event: EventEnvelope): TaskAgentInfo | null {
 
   return {
     agentName,
+    agentType,
     taskDescription: description,
     message: description,
     summary: description,
@@ -212,6 +215,7 @@ export async function createIngestServer(): Promise<FastifyInstance> {
       if (activeName !== taskAgent.agentName) {
         eventsToApply.push(buildSyntheticEvent(incoming, "subagentStart", {
           agentName: taskAgent.agentName,
+          agentType: taskAgent.agentType,
           taskDescription: taskAgent.taskDescription,
           message: taskAgent.message,
           summary: taskAgent.summary,

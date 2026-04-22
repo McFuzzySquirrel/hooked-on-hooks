@@ -184,6 +184,30 @@ describe("mapStateToLanes: LIVE-FR-01 (session + activity lanes)", () => {
     expect(agentLane?.label).not.toContain("sub-id");
   });
 
+  it("shows agentType as primary name with task name in parentheses", () => {
+    const state = applyEvents([
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", {
+        agentName: "f2-responsive-layout",
+        agentType: "ui-hud-developer"
+      })
+    ]);
+    const agentLane = mapStateToLanes(state).find((l) => l.id === "subagent");
+    expect(agentLane?.label).toBe("Agent: ui-hud-developer (f2-responsive-layout)");
+  });
+
+  it("shows only agentName when agentType matches agentName", () => {
+    const state = applyEvents([
+      makeEvent("sessionStart", {}),
+      makeEvent("subagentStart", {
+        agentName: "ui-hud-developer",
+        agentType: "ui-hud-developer"
+      })
+    ]);
+    const agentLane = mapStateToLanes(state).find((l) => l.id === "subagent");
+    expect(agentLane?.label).toBe("Agent: ui-hud-developer");
+  });
+
   it("falls back to agentName when agentDisplayName is absent", () => {
     const state = applyEvents([
       makeEvent("sessionStart", {}),

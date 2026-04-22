@@ -77,7 +77,8 @@ describe("ingestion inputs", () => {
 
     expect(body.count).toBe(2);
     expect(body.events[0]?.eventType).toBe("subagentStart");
-    expect(body.events[0]?.payload.agentName).toBe("project-architect");
+    expect(body.events[0]?.payload.agentName).toBe("phase1-foundation");
+    expect(body.events[0]?.payload.agentType).toBe("project-architect");
     expect(body.events[1]?.eventType).toBe("postToolUse");
 
     await server.close();

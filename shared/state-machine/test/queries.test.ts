@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findEventsByTraceId, findToolFailures, pairToolEvents } from "../src/index.js";
+import { findEventsByTraceId, findToolFailures, pairToolEvents, computeTimeBreakdown, computeToolDistribution } from "../src/index.js";
 import type { EventEnvelope } from "../../event-schema/src/index.js";
 
 const BASE = {
@@ -91,5 +91,108 @@ describe("state-machine queries", () => {
     expect(pairs[0].pairingMode).toBe("heuristic");
     expect(pairs[1].pairingMode).toBe("heuristic");
     expect(pairs[0].pre.eventId).not.toBe(pairs[1].pre.eventId);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-1: computeTimeBreakdown
+// ---------------------------------------------------------------------------
+
+describe("computeTimeBreakdown (P2-1)", () => {
+  it("returns zeroes for empty events", () => {
+    const result = computeTimeBreakdown([]);
+    expect(result.totalDurationMs).toBe(0);
+    expect(result.toolExecutionMs).toBe(0);
+    expect(result.llmThinkingMs).toBe(0);
+  });
+
+  it("computes tool execution time from paired events", () => {
+    const events: EventEnvelope[] = [
+      mk("sessionStart", {}),
+      mk("preToolUse", { toolName: "bash" }),
+      mk("postToolUse", { toolName: "bash", status: "success" }),
+      mk("sessionEnd", {}),
+    ];
+    const result = computeTimeBreakdown(events);
+    expect(result.totalDurationMs).toBeGreaterThan(0);
+    expect(result.toolExecutionMs).toBeGreaterThan(0);
+    expect(result.toolExecutionMs).toBeLessThanOrEqual(result.totalDurationMs);
+  });
+
+  it("categorizes ask_user as userWaitMs", () => {
+    const events: EventEnvelope[] = [
+      mk("sessionStart", {}),
+      mk("preToolUse", { toolName: "ask_user" }),
+      mk("postToolUse", { toolName: "ask_user", status: "success" }),
+      mk("sessionEnd", {}),
+    ];
+    const result = computeTimeBreakdown(events);
+    expect(result.userWaitMs).toBeGreaterThan(0);
+    expect(result.toolExecutionMs).toBe(0);
+  });
+
+  it("categorizes read_agent as agentWaitMs", () => {
+    const events: EventEnvelope[] = [
+      mk("sessionStart", {}),
+      mk("preToolUse", { toolName: "read_agent" }),
+      mk("postToolUse", { toolName: "read_agent", status: "success" }),
+      mk("sessionEnd", {}),
+    ];
+    const result = computeTimeBreakdown(events);
+    expect(result.agentWaitMs).toBeGreaterThan(0);
+    expect(result.toolExecutionMs).toBe(0);
+  });
+
+  it("llmThinkingMs fills the remaining time", () => {
+    const events: EventEnvelope[] = [
+      mk("sessionStart", {}),
+      mk("preToolUse", { toolName: "bash" }),
+      mk("postToolUse", { toolName: "bash", status: "success" }),
+      mk("preToolUse", { toolName: "view" }),
+      mk("postToolUse", { toolName: "view", status: "success" }),
+      mk("sessionEnd", {}),
+    ];
+    const result = computeTimeBreakdown(events);
+    expect(result.llmThinkingMs).toBeGreaterThanOrEqual(0);
+    const sum = result.toolExecutionMs + result.llmThinkingMs + result.userWaitMs + result.agentWaitMs;
+    expect(sum).toBe(result.totalDurationMs);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2-2: computeToolDistribution
+// ---------------------------------------------------------------------------
+
+describe("computeToolDistribution (P2-2)", () => {
+  it("returns empty array for no events", () => {
+    expect(computeToolDistribution([])).toEqual([]);
+  });
+
+  it("counts tool usage and computes durations", () => {
+    const events: EventEnvelope[] = [
+      mk("preToolUse", { toolName: "view" }),
+      mk("postToolUse", { toolName: "view", status: "success" }),
+      mk("preToolUse", { toolName: "view" }),
+      mk("postToolUse", { toolName: "view", status: "success" }),
+      mk("preToolUse", { toolName: "bash" }),
+      mk("postToolUse", { toolName: "bash", status: "success" }),
+    ];
+    const dist = computeToolDistribution(events);
+    expect(dist).toHaveLength(2);
+    // Sorted by count descending — view (2) before bash (1)
+    expect(dist[0].toolName).toBe("view");
+    expect(dist[0].count).toBe(2);
+    expect(dist[1].toolName).toBe("bash");
+    expect(dist[1].count).toBe(1);
+  });
+
+  it("computes average duration per tool", () => {
+    const events: EventEnvelope[] = [
+      mk("preToolUse", { toolName: "bash" }),
+      mk("postToolUse", { toolName: "bash", status: "success" }),
+    ];
+    const dist = computeToolDistribution(events);
+    expect(dist[0].avgDurationMs).toBeGreaterThan(0);
+    expect(dist[0].avgDurationMs).toBe(dist[0].totalDurationMs);
   });
 });
