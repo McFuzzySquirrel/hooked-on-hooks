@@ -115,12 +115,22 @@ describe("session dashboard helper functions", () => {
       modelsAndTokens: {
         detectedModels: ["gpt-5.3-codex"],
         tokenMentions: [],
-        modelUsage: [
-          { model: "gpt-5.3-codex", eventCount: 2, inputTokens: 100, outputTokens: 250, totalTokens: 350 },
-        ],
-        totals: { inputTokens: 100, outputTokens: 250, totalTokens: 350 },
-        notes: [],
-      },
+        modelsAndTokens: {
+          detectedModels: ["gpt-5.3-codex"],
+          tokenMentions: [],
+          modelUsage: [
+            { model: "gpt-5.3-codex", eventCount: 2, inputTokens: 100, outputTokens: 250, totalTokens: 350 },
+          ],
+          totals: { inputTokens: 100, outputTokens: 250, totalTokens: 350 },
+          reasoningEvents: [
+            { eventType: "assistant.message", model: "gpt-5.3-codex", snippet: "Reasoning snippet here.", inputTokens: 100, outputTokens: 250, totalTokens: 350 },
+          ],
+          modelChanges: [
+            { timestamp: "2026-04-22T20:30:00.000Z", oldModel: "gpt-4o", newModel: "gpt-5.3-codex" },
+          ],
+          notes: [],
+        },
+        },
       searchBlob: ["Contains TOKENS"],
     });
 

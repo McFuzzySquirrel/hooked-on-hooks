@@ -40,6 +40,50 @@ export interface TokenTotals {
   totalTokens: number;
 }
 
+export interface ReasoningEvent {
+  eventType: string;
+  model: string;
+  snippet: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  timestamp?: string;
+}
+
+export interface ModelChangeEntry {
+  timestamp: string;
+  oldModel: string;
+  newModel: string;
+}
+
+export interface ToolCall {
+  toolName: string;
+  intentionSummary?: string;
+  arguments?: Record<string, string>;
+  success?: boolean;
+  resultSummary?: string;
+}
+
+export interface SkillInvocation {
+  name: string;
+  description?: string;
+}
+
+export interface AgentCall {
+  agentName: string;
+  task?: string;
+}
+
+export interface TurnEnrichment {
+  interactionId: string;
+  model?: string;
+  outputTokens?: number;
+  tools: ToolCall[];
+  skills: SkillInvocation[];
+  agents: AgentCall[];
+  firstTimestamp?: string;
+}
+
 export interface SessionExport {
   sessionId: string;
   summary: string;
@@ -66,8 +110,11 @@ export interface SessionExport {
     tokenMentions: TokenMention[];
     modelUsage?: ModelUsageEntry[];
     totals?: TokenTotals;
+    reasoningEvents?: ReasoningEvent[];
+    modelChanges?: ModelChangeEntry[];
     notes: string[];
   };
+  turnEnrichments?: TurnEnrichment[];
   searchBlob: string[];
 }
 

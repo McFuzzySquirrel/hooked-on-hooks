@@ -61,15 +61,82 @@ describe("export-session-store", () => {
       [
         JSON.stringify({
           type: "session.model_change",
-          data: { newModel: "claude-opus-4.6" },
+          timestamp: "2026-04-20T10:00:00.000Z",
+          data: { previousModel: "gpt-4o", newModel: "claude-opus-4.6", timestamp: "2026-04-20T10:00:00.000Z" },
+        }),
+        // Interaction 1 — turn_start + assistant.message with tool requests + skill.invoked + tool.execution_complete
+        JSON.stringify({
+          type: "assistant.turn_start",
+          timestamp: "2026-04-20T10:01:00.000Z",
+          data: { interactionId: "interaction-001", turnId: "0" },
         }),
         JSON.stringify({
           type: "assistant.message",
-          data: { model: "claude-opus-4.6", inputTokens: 150, outputTokens: 300 },
+          timestamp: "2026-04-20T10:01:01.000Z",
+          data: {
+            interactionId: "interaction-001",
+            model: "claude-opus-4.6",
+            outputTokens: 264,
+            reasoningText: "The skill instructs me to follow a specific process. Let me analyze the existing context.",
+            toolRequests: [
+              { name: "view", intentionSummary: "view the PRD file", arguments: { path: "/docs/PRD.md" }, type: "function", toolCallId: "tc-001" },
+              { name: "skill", intentionSummary: "forge-build-feature-prd", arguments: { skill: "forge-build-feature-prd" }, type: "function", toolCallId: "tc-002" },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "skill.invoked",
+          timestamp: "2026-04-20T10:01:02.000Z",
+          data: { name: "forge-build-feature-prd", description: "Build a Feature PRD" },
         }),
         JSON.stringify({
           type: "tool.execution_complete",
-          data: { model: "gpt-5.3-codex", outputTokens: 75 },
+          timestamp: "2026-04-20T10:01:03.000Z",
+          data: {
+            interactionId: "interaction-001",
+            toolCallId: "tc-001",
+            toolName: "view",
+            success: true,
+            result: { content: "# PRD content here" },
+          },
+        }),
+        // Interaction 2 — assistant.message with subagent call
+        JSON.stringify({
+          type: "assistant.turn_start",
+          timestamp: "2026-04-20T10:02:00.000Z",
+          data: { interactionId: "interaction-002", turnId: "1" },
+        }),
+        JSON.stringify({
+          type: "assistant.message",
+          timestamp: "2026-04-20T10:02:01.000Z",
+          data: {
+            interactionId: "interaction-002",
+            model: "claude-opus-4.6",
+            outputTokens: 300,
+            toolRequests: [
+              { name: "subagent", intentionSummary: "qa-engineer", arguments: { agentName: "qa-engineer", task: "Write tests for the feature" }, type: "function", toolCallId: "tc-003" },
+            ],
+          },
+        }),
+        JSON.stringify({
+          type: "tool.execution_complete",
+          timestamp: "2026-04-20T10:02:02.000Z",
+          data: { model: "gpt-5.3-codex", outputTokens: 75, message: "Tool completed with results for the requested operation." },
+        }),
+        JSON.stringify({
+          type: "session.end",
+          data: {
+            modelMetrics: {
+              "claude-opus-4.6": {
+                requests: { count: 2 },
+                usage: { inputTokens: 500, outputTokens: 564, cacheReadTokens: 1000, cacheWriteTokens: 0, reasoningTokens: 10 },
+              },
+              "gpt-5.3-codex": {
+                requests: { count: 1 },
+                usage: { inputTokens: 100, outputTokens: 75, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 },
+              },
+            },
+          },
         }),
       ].join("\n"),
       "utf8"
@@ -138,8 +205,41 @@ describe("export-session-store", () => {
     expect(redacted.modelsAndTokens.detectedModels).toContain("gpt-5.3-codex");
     expect(redacted.modelsAndTokens.detectedModels).toContain("claude-opus-4.6");
     expect(redacted.modelsAndTokens.tokenMentions[0]?.value).toBe(1234);
-    expect(redacted.modelsAndTokens.totals.totalTokens).toBe(525);
-    expect(redacted.modelsAndTokens.modelUsage.find((entry) => entry.model === "claude-opus-4.6")?.totalTokens).toBe(450);
+    // Aggregate modelMetrics (session.end) is used — totals come from it
+    expect(redacted.modelsAndTokens.totals.totalTokens).toBe(1239); // (500+564) + (100+75)
+    expect(redacted.modelsAndTokens.totals.inputTokens).toBe(600); // 500 + 100
+    expect(redacted.modelsAndTokens.modelUsage.find((entry) => entry.model === "claude-opus-4.6")?.totalTokens).toBe(1064); // 500+564
+    expect(redacted.modelsAndTokens.modelUsage.find((entry) => entry.model === "claude-opus-4.6")?.inputTokens).toBe(500);
     expect(redacted.modelsAndTokens.modelUsage.find((entry) => entry.model === "gpt-5.3-codex")?.outputTokens).toBe(75);
+    expect(redacted.modelsAndTokens.modelUsage.find((entry) => entry.model === "gpt-5.3-codex")?.inputTokens).toBe(100);
+
+    // reasoning events: events with token usage should be captured
+    expect(redacted.modelsAndTokens.reasoningEvents.length).toBeGreaterThan(0);
+    const firstReasoning = redacted.modelsAndTokens.reasoningEvents[0];
+    expect(firstReasoning?.snippet.length).toBeLessThanOrEqual(201); // 200 chars + possible ellipsis
+    expect(firstReasoning?.inputTokens + firstReasoning!.outputTokens).toBeGreaterThan(0);
+
+    // model changes: session.model_change events should be captured
+    expect(redacted.modelsAndTokens.modelChanges.length).toBeGreaterThan(0);
+    const firstChange = redacted.modelsAndTokens.modelChanges[0];
+    expect(firstChange?.oldModel).toBe("gpt-4o");
+    expect(firstChange?.newModel).toBe("claude-opus-4.6");
+    expect(firstChange?.timestamp).toBe("2026-04-20T10:00:00.000Z");
+
+    // turn enrichments: interaction-level tool/skill/agent data
+    expect(redacted.turnEnrichments).toBeDefined();
+    expect(redacted.turnEnrichments!.length).toBeGreaterThanOrEqual(2);
+
+    const enrichment1 = redacted.turnEnrichments!.find((e) => e.interactionId === "interaction-001");
+    expect(enrichment1).toBeDefined();
+    expect(enrichment1!.model).toBe("claude-opus-4.6");
+    expect(enrichment1!.outputTokens).toBe(264);
+    expect(enrichment1!.tools.some((t) => t.toolName === "view")).toBe(true);
+    expect(enrichment1!.tools.find((t) => t.toolName === "view")?.success).toBe(true);
+    expect(enrichment1!.skills.some((s) => s.name === "forge-build-feature-prd")).toBe(true);
+
+    const enrichment2 = redacted.turnEnrichments!.find((e) => e.interactionId === "interaction-002");
+    expect(enrichment2).toBeDefined();
+    expect(enrichment2!.agents.some((a) => a.agentName === "qa-engineer")).toBe(true);
   });
 });

@@ -63,9 +63,42 @@ interface SessionExport {
       outputTokens: number;
       totalTokens: number;
     };
+    reasoningEvents: Array<{
+      eventType: string;
+      model: string;
+      snippet: string;
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      timestamp?: string;
+    }>;
+    modelChanges: Array<{
+      timestamp: string;
+      oldModel: string;
+      newModel: string;
+    }>;
     notes: string[];
   };
+  turnEnrichments: InternalTurnEnrichment[];
   searchBlob: string[];
+}
+
+interface InternalToolCall {
+  toolName: string;
+  intentionSummary?: string;
+  arguments?: Record<string, string>;
+  success?: boolean;
+  resultSummary?: string;
+}
+
+interface InternalTurnEnrichment {
+  interactionId: string;
+  model?: string;
+  outputTokens?: number;
+  tools: InternalToolCall[];
+  skills: Array<{ name: string; description?: string }>;
+  agents: Array<{ agentName: string; task?: string }>;
+  firstTimestamp?: string;
 }
 
 interface CombinedExport {
@@ -267,6 +300,22 @@ interface EventTokenTotals {
   totalTokens: number;
 }
 
+interface ReasoningEvent {
+  eventType: string;
+  model: string;
+  snippet: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  timestamp?: string;
+}
+
+interface ModelChangeEntry {
+  timestamp: string;
+  oldModel: string;
+  newModel: string;
+}
+
 interface EventModelMetrics {
   detectedModels: string[];
   modelUsage: Array<{
@@ -277,6 +326,8 @@ interface EventModelMetrics {
     totalTokens: number;
   }>;
   totals: EventTokenTotals;
+  reasoningEvents: ReasoningEvent[];
+  modelChanges: ModelChangeEntry[];
   eventsPathExists: boolean;
 }
 
@@ -300,11 +351,9 @@ function extractEventModelMetrics(dbPath: string, sessionId: string): EventModel
     return {
       detectedModels: [],
       modelUsage: [],
-      totals: {
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-      },
+      totals: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      reasoningEvents: [],
+      modelChanges: [],
       eventsPathExists: false,
     };
   }
@@ -312,12 +361,19 @@ function extractEventModelMetrics(dbPath: string, sessionId: string): EventModel
   const content = readFileSync(eventsPath, "utf8");
   const lines = content.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const modelSet = new Set<string>();
-  const modelUsageMap = new Map<string, { eventCount: number; inputTokens: number; outputTokens: number; totalTokens: number }>();
-  const totals: EventTokenTotals = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-  };
+  const reasoningEvents: ReasoningEvent[] = [];
+  const modelChanges: ModelChangeEntry[] = [];
+  let currentModel = ""; // tracks the last model seen via session.model_change or data.model
+
+  // modelMetrics aggregate (from session.end / session.snapshot events) — preferred source
+  // Map: modelName → { inputTokens, outputTokens, cacheReadTokens, reasoningTokens, requestCount, eventCount }
+  interface AggregateEntry { inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number; requestCount: number; eventCount: number }
+  const aggregateMap = new Map<string, AggregateEntry>();
+  let hasAggregate = false;
+
+  // Per-event sums (fallback when no aggregate found)
+  const perEventMap = new Map<string, { eventCount: number; inputTokens: number; outputTokens: number; totalTokens: number }>();
+  const perEventTotals: EventTokenTotals = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
 
   for (const line of lines) {
     let parsed: unknown;
@@ -327,9 +383,7 @@ function extractEventModelMetrics(dbPath: string, sessionId: string): EventModel
       continue;
     }
 
-    if (!parsed || typeof parsed !== "object") {
-      continue;
-    }
+    if (!parsed || typeof parsed !== "object") continue;
 
     const envelope = parsed as Record<string, unknown>;
     const type = typeof envelope.type === "string" ? envelope.type : "";
@@ -337,6 +391,48 @@ function extractEventModelMetrics(dbPath: string, sessionId: string): EventModel
       ? envelope.data as Record<string, unknown>
       : {};
 
+    // ── Aggregate modelMetrics block (session.end / session.snapshot) ───────────
+    if (data.modelMetrics && typeof data.modelMetrics === "object") {
+      const mm = data.modelMetrics as Record<string, unknown>;
+      for (const [modelName, raw] of Object.entries(mm)) {
+        if (!raw || typeof raw !== "object") continue;
+        const entry = raw as Record<string, unknown>;
+        const usage = entry.usage && typeof entry.usage === "object"
+          ? entry.usage as Record<string, unknown>
+          : {};
+        const requests = entry.requests && typeof entry.requests === "object"
+          ? entry.requests as Record<string, unknown>
+          : {};
+        const prev = aggregateMap.get(modelName) ?? { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, reasoningTokens: 0, requestCount: 0, eventCount: 0 };
+        // Take the max (these are cumulative counters — later events supersede earlier ones)
+        aggregateMap.set(modelName, {
+          inputTokens: Math.max(prev.inputTokens, readTokenNumber(usage, ["inputTokens", "input_tokens"])),
+          outputTokens: Math.max(prev.outputTokens, readTokenNumber(usage, ["outputTokens", "output_tokens"])),
+          cacheReadTokens: Math.max(prev.cacheReadTokens, readTokenNumber(usage, ["cacheReadTokens", "cache_read_tokens"])),
+          reasoningTokens: Math.max(prev.reasoningTokens, readTokenNumber(usage, ["reasoningTokens", "reasoning_tokens"])),
+          requestCount: Math.max(prev.requestCount, readTokenNumber(requests, ["count"])),
+          eventCount: prev.eventCount,
+        });
+        modelSet.add(modelName);
+        hasAggregate = true;
+      }
+    }
+
+    // ── Model change timeline ────────────────────────────────────────────────────
+    if (type === "session.model_change" && typeof data.newModel === "string") {
+      const tsRaw = data.timestamp ?? envelope.timestamp;
+      const oldModel =
+        typeof data.previousModel === "string" ? data.previousModel :
+        typeof data.oldModel === "string" ? data.oldModel : "(unknown)";
+      modelChanges.push({
+        timestamp: typeof tsRaw === "string" ? tsRaw : "",
+        oldModel,
+        newModel: data.newModel,
+      });
+      currentModel = data.newModel; // update tracked model immediately
+    }
+
+    // ── Per-event token accumulation (fallback + reasoning snippets) ─────────────
     const usage = data.usage && typeof data.usage === "object"
       ? data.usage as Record<string, unknown>
       : {};
@@ -344,63 +440,119 @@ function extractEventModelMetrics(dbPath: string, sessionId: string): EventModel
     const inputTokens =
       readTokenNumber(data, ["inputTokens", "promptTokens", "input_tokens", "prompt_tokens"]) ||
       readTokenNumber(usage, ["inputTokens", "promptTokens", "input_tokens", "prompt_tokens"]);
-
     const outputTokens =
       readTokenNumber(data, ["outputTokens", "completionTokens", "output_tokens", "completion_tokens"]) ||
       readTokenNumber(usage, ["outputTokens", "completionTokens", "output_tokens", "completion_tokens"]);
-
     const explicitTotal =
       readTokenNumber(data, ["totalTokens", "total_tokens", "tokens"]) ||
       readTokenNumber(usage, ["totalTokens", "total_tokens", "tokens"]);
-
     const directionalTotal = inputTokens + outputTokens;
     const totalTokens = directionalTotal > 0 ? directionalTotal : explicitTotal;
-
-    totals.inputTokens += inputTokens;
-    totals.outputTokens += outputTokens;
-    totals.totalTokens += totalTokens;
 
     let model = "";
     if (typeof data.model === "string") {
       model = data.model;
     } else if (type === "session.model_change" && typeof data.newModel === "string") {
       model = data.newModel;
+    } else if (currentModel) {
+      // fallback: use last-known model (e.g. assistant.message events don't carry a model field)
+      model = currentModel;
     }
 
-    if (!model) {
-      continue;
+    // Keep currentModel up-to-date
+    if (model) currentModel = model;
+
+    if (model) {
+      modelSet.add(model);
+
+      if (!perEventMap.has(model)) {
+        perEventMap.set(model, { eventCount: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+      }
+      const pe = perEventMap.get(model)!;
+      pe.eventCount += 1;
+      pe.inputTokens += inputTokens;
+      pe.outputTokens += outputTokens;
+      pe.totalTokens += totalTokens;
+
+      // Track event count in aggregateMap too
+      if (aggregateMap.has(model)) {
+        aggregateMap.get(model)!.eventCount += 1;
+      }
     }
 
-    modelSet.add(model);
+    perEventTotals.inputTokens += inputTokens;
+    perEventTotals.outputTokens += outputTokens;
+    perEventTotals.totalTokens += totalTokens;
 
-    if (!modelUsageMap.has(model)) {
-      modelUsageMap.set(model, {
-        eventCount: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
+    // ── Reasoning events (events with output tokens and a known model) ───────────
+    if ((inputTokens > 0 || outputTokens > 0) && model) {
+      const snippetKeys = ["reasoningText", "content", "message", "text", "response", "assistantResponse", "result"];
+      let rawSnippet = "";
+      for (const key of snippetKeys) {
+        const val = data[key];
+        if (typeof val === "string" && val.trim().length > 0) {
+          rawSnippet = val;
+          break;
+        }
+      }
+
+      // If still empty, try extracting from toolRequests[].intentionSummary
+      if (!rawSnippet && Array.isArray(data.toolRequests)) {
+        const summaries = (data.toolRequests as Array<Record<string, unknown>>)
+          .map((tr) => typeof tr.intentionSummary === "string" ? tr.intentionSummary.trim() : "")
+          .filter((s) => s.length > 0);
+        if (summaries.length > 0) {
+          rawSnippet = summaries.join(" | ");
+        }
+      }
+
+      const snippet = rawSnippet.length > 200 ? rawSnippet.slice(0, 200) + "\u2026" : rawSnippet;
+      const tsRaw = data.timestamp ?? envelope.timestamp;
+      reasoningEvents.push({
+        eventType: type,
+        model,
+        snippet,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        timestamp: typeof tsRaw === "string" ? tsRaw : undefined,
       });
     }
-
-    const usageEntry = modelUsageMap.get(model);
-    if (!usageEntry) {
-      continue;
-    }
-
-    usageEntry.eventCount += 1;
-    usageEntry.inputTokens += inputTokens;
-    usageEntry.outputTokens += outputTokens;
-    usageEntry.totalTokens += totalTokens;
   }
 
-  const modelUsage = [...modelUsageMap.entries()]
-    .map(([model, usage]) => ({ model, ...usage }))
-    .sort((a, b) => b.totalTokens - a.totalTokens || b.eventCount - a.eventCount || a.model.localeCompare(b.model));
+  // ── Build final modelUsage and totals ────────────────────────────────────────
+  let modelUsage: Array<{ model: string; eventCount: number; inputTokens: number; outputTokens: number; totalTokens: number; cacheReadTokens?: number; reasoningTokens?: number }>;
+  let totals: EventTokenTotals;
+
+  if (hasAggregate) {
+    // Use modelMetrics aggregate — definitive cumulative per-model numbers
+    modelUsage = [...aggregateMap.entries()].map(([model, agg]) => ({
+      model,
+      eventCount: perEventMap.get(model)?.eventCount ?? agg.requestCount,
+      inputTokens: agg.inputTokens,
+      outputTokens: agg.outputTokens,
+      totalTokens: agg.inputTokens + agg.outputTokens,
+      cacheReadTokens: agg.cacheReadTokens,
+      reasoningTokens: agg.reasoningTokens,
+    })).sort((a, b) => b.totalTokens - a.totalTokens || b.eventCount - a.eventCount || a.model.localeCompare(b.model));
+
+    const aggInput = modelUsage.reduce((s, e) => s + e.inputTokens, 0);
+    const aggOutput = modelUsage.reduce((s, e) => s + e.outputTokens, 0);
+    totals = { inputTokens: aggInput, outputTokens: aggOutput, totalTokens: aggInput + aggOutput };
+  } else {
+    // Fallback: per-event sums
+    modelUsage = [...perEventMap.entries()]
+      .map(([model, pe]) => ({ model, ...pe }))
+      .sort((a, b) => b.totalTokens - a.totalTokens || b.eventCount - a.eventCount || a.model.localeCompare(b.model));
+    totals = perEventTotals;
+  }
 
   return {
     detectedModels: [...modelSet].sort(),
     modelUsage,
     totals,
+    reasoningEvents,
+    modelChanges,
     eventsPathExists: true,
   };
 }
@@ -476,6 +628,155 @@ export function getSessionCards(dbPath: string): SessionCard[] {
       createdAt: safeString(row.created_at, ""),
     };
   });
+}
+
+// ── Turn enrichments (tools / skills / agents per interaction) ──────────────
+
+function extractTurnEnrichments(dbPath: string, sessionId: string): InternalTurnEnrichment[] {
+  const eventsPath = resolveSessionEventsJsonlPath(dbPath, sessionId);
+  if (!existsSync(eventsPath)) return [];
+
+  const lines = readFileSync(eventsPath, "utf8")
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length > 0);
+
+  const interactionMap = new Map<string, InternalTurnEnrichment>();
+  let currentInteractionId = "";
+
+  const getOrCreate = (id: string, ts?: string): InternalTurnEnrichment => {
+    if (!interactionMap.has(id)) {
+      interactionMap.set(id, { interactionId: id, tools: [], skills: [], agents: [], firstTimestamp: ts });
+    }
+    return interactionMap.get(id)!;
+  };
+
+  for (const line of lines) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(line); } catch { continue; }
+    if (!parsed || typeof parsed !== "object") continue;
+
+    const envelope = parsed as Record<string, unknown>;
+    const type = typeof envelope.type === "string" ? envelope.type : "";
+    const ts = typeof envelope.timestamp === "string" ? envelope.timestamp : undefined;
+    const data = envelope.data && typeof envelope.data === "object"
+      ? envelope.data as Record<string, unknown>
+      : {};
+
+    const interactionId =
+      typeof data.interactionId === "string" ? data.interactionId : "";
+
+    if (interactionId) currentInteractionId = interactionId;
+
+    if (type === "assistant.turn_start" && interactionId) {
+      getOrCreate(interactionId, ts);
+      continue;
+    }
+
+    if (type === "assistant.message" && interactionId) {
+      const entry = getOrCreate(interactionId, ts);
+
+      // tokens + model
+      if (typeof data.outputTokens === "number") {
+        entry.outputTokens = (entry.outputTokens ?? 0) + data.outputTokens;
+      }
+      if (typeof data.model === "string") entry.model = data.model;
+
+      // tool requests
+      if (Array.isArray(data.toolRequests)) {
+        for (const req of data.toolRequests as Array<Record<string, unknown>>) {
+          const toolName = typeof req.name === "string" ? req.name : "";
+          if (!toolName) continue;
+
+          const intentionSummary = typeof req.intentionSummary === "string"
+            ? req.intentionSummary : undefined;
+
+          // flatten simple string arguments only
+          const rawArgs = req.arguments && typeof req.arguments === "object"
+            ? req.arguments as Record<string, unknown> : {};
+          const flatArgs: Record<string, string> = {};
+          for (const [k, v] of Object.entries(rawArgs)) {
+            if (typeof v === "string" && v.length <= 500) flatArgs[k] = v;
+            else if (typeof v === "number" || typeof v === "boolean") flatArgs[k] = String(v);
+          }
+
+          const isAgent = toolName === "subagent" || toolName === "agent" ||
+            "agentName" in rawArgs || "agent_name" in rawArgs;
+
+          if (isAgent) {
+            const agentName = typeof rawArgs.agentName === "string" ? rawArgs.agentName
+              : typeof rawArgs.agent_name === "string" ? rawArgs.agent_name
+              : typeof rawArgs.name === "string" ? rawArgs.name
+              : intentionSummary ?? toolName;
+            const task = typeof rawArgs.task === "string" ? rawArgs.task
+              : typeof rawArgs.prompt === "string" ? rawArgs.prompt.slice(0, 200)
+              : undefined;
+            entry.agents.push({ agentName, task });
+          } else {
+            entry.tools.push({
+              toolName,
+              intentionSummary,
+              arguments: Object.keys(flatArgs).length > 0 ? flatArgs : undefined,
+            });
+          }
+        }
+      }
+      continue;
+    }
+
+    if (type === "tool.execution_complete") {
+      const targetId = interactionId || currentInteractionId;
+      if (!targetId) continue;
+      const entry = getOrCreate(targetId, ts);
+
+      const toolCallId = typeof data.toolCallId === "string" ? data.toolCallId : "";
+      const success = typeof data.success === "boolean" ? data.success : undefined;
+
+      // find the matching tool entry (by toolCallId if we stored it, else last matching name)
+      const resultRaw = data.result && typeof data.result === "object"
+        ? data.result as Record<string, unknown> : {};
+      const rawSummary =
+        typeof resultRaw["content"] === "string" ? resultRaw["content"] :
+        typeof resultRaw["detailedContent"] === "string" ? resultRaw["detailedContent"] :
+        typeof resultRaw["textResultForLlm"] === "string" ? resultRaw["textResultForLlm"] : "";
+      const resultSummary = rawSummary.length > 0
+        ? rawSummary.slice(0, 150) + (rawSummary.length > 150 ? "\u2026" : "")
+        : undefined;
+
+      // back-fill success + result onto the matching tool call
+      const toolName = typeof data.toolName === "string" ? data.toolName : "";
+      void toolCallId; // reserved for future exact matching
+      let tool: InternalToolCall | undefined;
+      if (toolName) {
+        for (let i = entry.tools.length - 1; i >= 0; i -= 1) {
+          const candidate = entry.tools[i];
+          if (candidate.toolName === toolName && candidate.success === undefined) {
+            tool = candidate;
+            break;
+          }
+        }
+      }
+      if (tool) {
+        tool.success = success;
+        tool.resultSummary = resultSummary;
+      }
+      continue;
+    }
+
+    if (type === "skill.invoked") {
+      const targetId = currentInteractionId;
+      if (!targetId) continue;
+      const entry = getOrCreate(targetId, ts);
+      const name = typeof data.name === "string" ? data.name : "";
+      const description = typeof data.description === "string" ? data.description : undefined;
+      if (name && !entry.skills.some((s) => s.name === name)) {
+        entry.skills.push({ name, description });
+      }
+    }
+  }
+
+  return [...interactionMap.values()].sort((a, b) =>
+    (a.firstTimestamp ?? "").localeCompare(b.firstTimestamp ?? "")
+  );
 }
 
 export function getSessionExport(dbPath: string, sessionId: string, redact: boolean): SessionExport {
@@ -560,6 +861,7 @@ export function getSessionExport(dbPath: string, sessionId: string, redact: bool
   const searchDetectedModels = detectModels(searchBlob);
   const tokenMentions = detectTokenMentions(searchBlob);
   const eventMetrics = extractEventModelMetrics(dbPath, sessionId);
+  const turnEnrichments = extractTurnEnrichments(dbPath, sessionId);
   const detectedModels = [...new Set([...searchDetectedModels, ...eventMetrics.detectedModels])].sort();
 
   const eventCount = turns.length + checkpoints.length + files.length + refs.length;
@@ -598,6 +900,8 @@ export function getSessionExport(dbPath: string, sessionId: string, redact: bool
       tokenMentions,
       modelUsage: eventMetrics.modelUsage,
       totals: eventMetrics.totals,
+      reasoningEvents: eventMetrics.reasoningEvents,
+      modelChanges: eventMetrics.modelChanges,
       notes: [
         "Model and token details are sourced from session-state events.jsonl when available.",
         "Additional model/token mentions are inferred from indexed text for compatibility.",
@@ -607,6 +911,7 @@ export function getSessionExport(dbPath: string, sessionId: string, redact: bool
         "If SQLite FTS5 is unavailable, search data falls back to turns/checkpoints/files/refs text.",
       ],
     },
+    turnEnrichments,
     searchBlob,
   };
 }

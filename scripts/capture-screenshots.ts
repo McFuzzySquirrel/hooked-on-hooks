@@ -1,172 +1,136 @@
-/**
- * Playwright screenshot capture for the Copilot Activity Visualiser.
- *
- * Usage:
- *   npx playwright test scripts/capture-screenshots.ts
- *
- * Prerequisites:
- *   - Ingest service running on http://127.0.0.1:7070
- *   - Web UI running on http://127.0.0.1:5173
- *   - A session actively sending events (or already completed)
- */
-
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const REPO_ROOT = join(__dirname, '..');
 
-const BASE_URL = 'http://127.0.0.1:5173';
-const SCREENSHOT_DIR = join(__dirname, '..', 'docs', 'tutorials', 'assets', 'tutorial-screenshots', 'ui-features');
+const BASE_URL = process.env.UI_BASE_URL ?? 'http://127.0.0.1:5173';
+const SCREENSHOT_DIR = join(
+  REPO_ROOT,
+  'docs',
+  'tutorials',
+  'assets',
+  'tutorial-screenshots',
+  'session-dashboard'
+);
 
-test.describe('Visualiser Screenshot Capture', () => {
-  test.beforeEach(async ({ page }) => {
+const SESSION_LIST_JSON = process.env.SESSION_LIST_JSON ?? join(
+  REPO_ROOT,
+  'tests',
+  'fixtures',
+  'screenshot-demo',
+  'session-list.demo.json'
+);
+const SESSION_EXPORT_JSON = process.env.SESSION_EXPORT_JSON ?? join(
+  REPO_ROOT,
+  'tests',
+  'fixtures',
+  'screenshot-demo',
+  'session-export.demo.json'
+);
+const SANITIZE_SCREENSHOTS = process.env.SANITIZE_SCREENSHOTS !== 'false';
+
+async function sanitizeVisibleData(page: Page): Promise<void> {
+  if (!SANITIZE_SCREENSHOTS) return;
+
+  await page.evaluate(() => {
+    const hide = (el: Element, replacement: string): void => {
+      if (el instanceof HTMLElement) {
+        el.textContent = replacement;
+      }
+    };
+
+    document.querySelectorAll('.mono').forEach((el) => {
+      const text = (el.textContent ?? '').trim();
+      if (!text) return;
+
+      if (text.includes('/')) {
+        hide(el, '[path hidden]');
+        return;
+      }
+
+      if (text.length >= 16 && /[a-z0-9\-]{12,}/i.test(text)) {
+        hide(el, '[id hidden]');
+      }
+    });
+
+    document.querySelectorAll('.turn-message, .tool-result, .reasoning-snippet, .search-results li').forEach((el) => {
+      const text = (el.textContent ?? '').trim();
+      if (!text) return;
+      if (text.length > 120) {
+        hide(el, `${text.slice(0, 100)}... [sanitized]`);
+      }
+    });
+  });
+}
+
+test.describe('Session Dashboard walkthrough screenshots', () => {
+  test('capture selector and dashboard flow', async ({ page }) => {
+    await page.setViewportSize({ width: 1560, height: 980 });
     await page.goto(BASE_URL);
-    // Wait for the app to render
-    await page.waitForSelector('[class*="app"], [id="root"], body', { timeout: 10_000 });
-    // Give SSE time to deliver state
-    await page.waitForTimeout(2000);
-  });
+    await page.waitForSelector('h1:has-text("Copilot Session Explorer")', { timeout: 15_000 });
 
-  test('full UI overview', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
+    const sessionListInput = page
+      .locator('label:has-text("Load Session List JSON") input[type="file"]')
+      .first();
+    await sessionListInput.setInputFiles(SESSION_LIST_JSON);
+
+    await expect(page.locator('.session-card').first()).toBeVisible({ timeout: 10_000 });
+    await sanitizeVisibleData(page);
     await page.screenshot({
-      path: join(SCREENSHOT_DIR, 'ui-overview.png'),
+      path: join(SCREENSHOT_DIR, '01-selector-loaded.png'),
       fullPage: false,
     });
-  });
 
-  test('live activity board', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
-
-    // Try to capture the lane/status area
-    const lanes = page.locator('[class*="lane"], [class*="status"], [class*="board"]').first();
-    if (await lanes.isVisible()) {
-      await lanes.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-live-activity-board.png'),
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-live-activity-board.png'),
-        fullPage: false,
-      });
-    }
-  });
-
-  test('gantt chart with parallel tools', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
-
-    const gantt = page.locator('[class*="gantt"], [class*="Gantt"], [class*="timeline"]').first();
-    if (await gantt.isVisible()) {
-      await gantt.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-gantt-parallel-tools.png'),
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-gantt-parallel-tools.png'),
-        fullPage: false,
-      });
-    }
-  });
-
-  test('event inspector with tracing', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
-
-    // Click the first event in the list to open inspector
-    const eventItem = page.locator('[class*="event"], [class*="Event"]').first();
-    if (await eventItem.isVisible()) {
-      await eventItem.click();
-      await page.waitForTimeout(500);
-    }
-
-    const inspector = page.locator('[class*="inspector"], [class*="Inspector"]').first();
-    if (await inspector.isVisible()) {
-      await inspector.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-event-inspector-tracing.png'),
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-event-inspector-tracing.png'),
-        fullPage: false,
-      });
-    }
-  });
-
-  test('filter controls', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
-
-    const filters = page.locator('[class*="filter"], [class*="Filter"]').first();
-    if (await filters.isVisible()) {
-      await filters.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-filter-controls.png'),
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-filter-controls.png'),
-        fullPage: false,
-      });
-    }
-  });
-
-  test('replay mode', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
-
-    // Look for a replay button/toggle
-    const replayBtn = page.locator('button:has-text("Replay"), button:has-text("replay"), [class*="replay"]').first();
-    if (await replayBtn.isVisible()) {
-      await replayBtn.click();
-      await page.waitForTimeout(1000);
-    }
-
+    const firstCheckbox = page.locator('.session-card input[type="checkbox"]').first();
+    await firstCheckbox.check();
+    await expect(page.locator('.summary-box')).toBeVisible({ timeout: 5_000 });
+    await sanitizeVisibleData(page);
     await page.screenshot({
-      path: join(SCREENSHOT_DIR, 'ui-replay-mode.png'),
+      path: join(SCREENSHOT_DIR, '02-selector-selection-and-export-command.png'),
       fullPage: false,
     });
-  });
 
-  test('reporting and export', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
+    await page.getByRole('button', { name: 'Session Dashboard' }).click();
+    const exportInput = page
+      .locator('label:has-text("Load Export JSON") input[type="file"]')
+      .first();
+    await exportInput.setInputFiles(SESSION_EXPORT_JSON);
 
-    // Look for export/CSV button
-    const exportBtn = page.locator('button:has-text("Export"), button:has-text("CSV"), [class*="export"]').first();
-    if (await exportBtn.isVisible()) {
-      await exportBtn.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-reporting-export-csv.png'),
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-reporting-export-csv.png'),
-        fullPage: false,
-      });
-    }
-  });
+    await expect(page.locator('.session-item').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole('button', { name: 'Overview' })).toBeVisible({ timeout: 10_000 });
 
-  test('pairing diagnostics tooltip', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.waitForTimeout(1000);
+    await sanitizeVisibleData(page);
+    await page.screenshot({
+      path: join(SCREENSHOT_DIR, '03-dashboard-overview.png'),
+      fullPage: false,
+    });
 
-    const pairing = page.locator('[class*="pairing"], [class*="Pairing"], [class*="diagnostic"]').first();
-    if (await pairing.isVisible()) {
-      // Hover to trigger tooltip
-      await pairing.hover();
-      await page.waitForTimeout(500);
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-pairing-tooltip.png'),
-        fullPage: false,
-      });
-    } else {
-      await page.screenshot({
-        path: join(SCREENSHOT_DIR, 'ui-pairing-tooltip.png'),
-        fullPage: false,
-      });
-    }
+    await page.getByRole('button', { name: 'Turns' }).click();
+    await page.waitForTimeout(500);
+    await sanitizeVisibleData(page);
+    await page.screenshot({
+      path: join(SCREENSHOT_DIR, '04-dashboard-turns-with-tools-skills-agents.png'),
+      fullPage: false,
+    });
+
+    await page.getByRole('button', { name: 'Models & Tokens' }).click();
+    await page.waitForTimeout(500);
+    await sanitizeVisibleData(page);
+    await page.screenshot({
+      path: join(SCREENSHOT_DIR, '05-dashboard-models-and-tokens.png'),
+      fullPage: false,
+    });
+
+    await page.getByRole('button', { name: 'Search' }).click();
+    await page.getByPlaceholder('Search all session content').fill('tool');
+    await page.waitForTimeout(500);
+    await sanitizeVisibleData(page);
+    await page.screenshot({
+      path: join(SCREENSHOT_DIR, '06-dashboard-search.png'),
+      fullPage: false,
+    });
   });
 });

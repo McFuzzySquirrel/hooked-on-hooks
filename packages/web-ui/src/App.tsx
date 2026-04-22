@@ -431,14 +431,124 @@ export function App() {
                 {tab === "turns" ? (
                   <section className="tab-panel">
                     {activeSession.turns.length === 0 ? <p>No turns found.</p> : null}
-                    {activeSession.turns.map((turn, index) => (
-                      <article key={`${turn.id ?? index}`} className="list-card">
-                        <h3>Turn #{String(turn.turn_index ?? index + 1)}</h3>
-                        <p><strong>User:</strong> {String(turn.user_message ?? "")}</p>
-                        <p><strong>Assistant:</strong> {String(turn.assistant_response ?? "")}</p>
-                        <small>{formatDate(String(turn.timestamp ?? ""))}</small>
-                      </article>
-                    ))}
+                    {activeSession.turns.map((turn, index) => {
+                      const enrichment = activeSession.turnEnrichments?.[index];
+                      const hasActivity =
+                        enrichment &&
+                        (enrichment.tools.length > 0 ||
+                          enrichment.skills.length > 0 ||
+                          enrichment.agents.length > 0);
+                      return (
+                        <article key={`${turn.id ?? index}`} className="turn-card">
+                          {/* ── Header ── */}
+                          <div className="turn-header">
+                            <strong>Turn #{String(turn.turn_index ?? index + 1)}</strong>
+                            {enrichment?.model ? (
+                              <span className="turn-model-badge">{enrichment.model}</span>
+                            ) : null}
+                            {enrichment?.outputTokens ? (
+                              <span className="turn-token-badge">
+                                {enrichment.outputTokens.toLocaleString()} out tokens
+                              </span>
+                            ) : null}
+                            {hasActivity ? (
+                              <span className="turn-token-badge">
+                                {enrichment.tools.length > 0
+                                  ? `${enrichment.tools.length} tool${enrichment.tools.length > 1 ? "s" : ""}`
+                                  : null}
+                                {enrichment.tools.length > 0 && enrichment.skills.length > 0 ? " · " : null}
+                                {enrichment.skills.length > 0
+                                  ? `${enrichment.skills.length} skill${enrichment.skills.length > 1 ? "s" : ""}`
+                                  : null}
+                                {(enrichment.tools.length > 0 || enrichment.skills.length > 0) &&
+                                enrichment.agents.length > 0
+                                  ? " · "
+                                  : null}
+                                {enrichment.agents.length > 0
+                                  ? `${enrichment.agents.length} agent${enrichment.agents.length > 1 ? "s" : ""}`
+                                  : null}
+                              </span>
+                            ) : null}
+                            <span className="turn-token-badge" style={{ marginLeft: "auto" }}>
+                              {formatDate(String(turn.timestamp ?? ""))}
+                            </span>
+                          </div>
+
+                          <div className="turn-body">
+                            {/* ── User message ── */}
+                            {turn.user_message ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">User</div>
+                                <p className="turn-message">{String(turn.user_message)}</p>
+                              </div>
+                            ) : null}
+
+                            {/* ── Activity: tools, skills, agents ── */}
+                            {hasActivity ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">Activity</div>
+                                <div className="turn-activity">
+                                  {enrichment.tools.map((tool, ti) => (
+                                    <div key={ti} className="tool-item">
+                                      <div className="tool-item-header">
+                                        <span className="tool-name-badge">{tool.toolName}</span>
+                                        {tool.success === true ? (
+                                          <span className="tool-success">✓</span>
+                                        ) : tool.success === false ? (
+                                          <span className="tool-failure">✗</span>
+                                        ) : null}
+                                        {tool.intentionSummary ? (
+                                          <span className="tool-intention">{tool.intentionSummary}</span>
+                                        ) : null}
+                                      </div>
+                                      {tool.arguments && Object.keys(tool.arguments).length > 0 ? (
+                                        <div className="tool-args">
+                                          {Object.entries(tool.arguments)
+                                            .filter(([, v]) => v.length <= 120)
+                                            .slice(0, 5)
+                                            .map(([k, v]) => (
+                                              <span key={k} className="tool-arg-pair">
+                                                <strong>{k}:</strong> {v}
+                                              </span>
+                                            ))}
+                                        </div>
+                                      ) : null}
+                                      {tool.resultSummary ? (
+                                        <pre className="tool-result">{tool.resultSummary}</pre>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  {enrichment.agents.map((agent, ai) => (
+                                    <div key={ai} className="agent-item">
+                                      <span className="agent-pill">{agent.agentName}</span>
+                                      {agent.task ? (
+                                        <span className="agent-task">{agent.task}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  {enrichment.skills.map((skill, si) => (
+                                    <div key={si} className="skill-item">
+                                      <span className="skill-pill">{skill.name}</span>
+                                      {skill.description ? (
+                                        <span className="skill-description">{skill.description}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {/* ── Assistant response ── */}
+                            {turn.assistant_response ? (
+                              <div className="turn-section">
+                                <div className="turn-section-label">Assistant</div>
+                                <p className="turn-message">{String(turn.assistant_response)}</p>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
                   </section>
                 ) : null}
 
@@ -494,6 +604,54 @@ export function App() {
                       </ul>
                     ) : (
                       <p>No per-model usage records available.</p>
+                    )}
+
+                    <h3>Model Change Timeline</h3>
+                    {activeSession.modelsAndTokens.modelChanges && activeSession.modelsAndTokens.modelChanges.length > 0 ? (
+                      <ol>
+                        {activeSession.modelsAndTokens.modelChanges.map((change, index) => (
+                          <li key={index}>
+                            {change.timestamp ? <span className="mono">[{change.timestamp}]</span> : null}
+                            {change.timestamp ? " " : null}
+                            <span className="mono">{change.oldModel}</span>
+                            {" \u2192 "}
+                            <span className="mono">{change.newModel}</span>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <p>No model changes recorded.</p>
+                    )}
+
+                    <h3>Reasoning Events</h3>
+                    {activeSession.modelsAndTokens.reasoningEvents && activeSession.modelsAndTokens.reasoningEvents.length > 0 ? (() => {
+                      const events = activeSession.modelsAndTokens.reasoningEvents!;
+                      const visible = events.slice(0, 50);
+                      const overflow = events.length - visible.length;
+                      return (
+                        <>
+                          {visible.map((event, index) => (
+                            <div key={index} className="reasoning-event">
+                              <div className="reasoning-event-meta">
+                                <span className="event-type-badge">{event.eventType}</span>
+                                {" "}
+                                <span className="mono">{event.model}</span>
+                                {" — "}
+                                in: {event.inputTokens.toLocaleString()}, out: {event.outputTokens.toLocaleString()}, total: {event.totalTokens.toLocaleString()}
+                                {event.timestamp ? <span className="reasoning-event-ts"> [{event.timestamp}]</span> : null}
+                              </div>
+                              {event.snippet ? (
+                                <blockquote className="reasoning-snippet">{event.snippet}</blockquote>
+                              ) : (
+                                <p className="reasoning-snippet-empty">(no text snippet available)</p>
+                              )}
+                            </div>
+                          ))}
+                          {overflow > 0 ? <p className="overflow-note">&hellip; and {overflow.toLocaleString()} more reasoning events not shown.</p> : null}
+                        </>
+                      );
+                    })() : (
+                      <p>No reasoning events with token usage recorded.</p>
                     )}
 
                     <h3>Token Mentions</h3>
