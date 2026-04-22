@@ -11,12 +11,16 @@ import {
   getSessionExport,
 } from "../export-session-store.js";
 
+const sqliteCheck = spawnSync("sqlite3", ["--version"], { encoding: "utf8" });
+const hasSqlite = sqliteCheck.status === 0;
+const describeIfSqlite = hasSqlite ? describe : describe.skip;
+
 function execSql(dbPath: string, sql: string): void {
   const result = spawnSync("sqlite3", [dbPath, sql], { encoding: "utf8" });
   expect(result.status, result.stderr).toBe(0);
 }
 
-describe("export-session-store", () => {
+describeIfSqlite("export-session-store", () => {
   let tempRoot = "";
   let dbPath = "";
 
