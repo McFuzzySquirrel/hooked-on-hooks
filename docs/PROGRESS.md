@@ -4,10 +4,16 @@
 
 **Mode**: Feature-Based Build  
 **Product Vision**: docs/product-vision.md  
-**Status**: Complete (MVP + post-MVP enhancements)  
-**Last Updated**: 2026-04-19
+**Status**: Complete (MVP + post-MVP enhancements) + static dashboard migration in progress  
+**Last Updated**: 2026-04-22
 
 All five planned MVP features are complete and validated locally. Post-MVP work includes integration tooling (bootstrap/unbootstrap), live board UI polish, tracing v2 (event-stream correlation), and operator UX/learning-surface updates captured in the dedicated post-MVP feature document.
+
+Static session dashboard migration has started on branch `feat/staic-session-date` with these delivered increments:
+
+- New `session:list` and `session:export` CLI flow over `~/.copilot/session-store.db`
+- Selector + dashboard app-shell replacement in `packages/web-ui`
+- Exporter and dashboard helper tests added and passing
 
 ## Tracing v2: Event-Stream Correlation (Post-MVP)
 
@@ -187,8 +193,8 @@ All five planned MVP features are complete and validated locally. Post-MVP work 
 ✓ scripts/test/bootstrap.test.ts                      (15 tests)
 ✓ scripts/test/unbootstrap.test.ts                     (7 tests)
 ✓ packages/web-ui/test/queries-analytics.test.ts      (13 tests)
-Test Files  13 passed (13)
-      Tests  258 passed (258)
+Test Files  15 passed (15)
+      Tests  277 passed (277)
 Coverage: lines ≥80% (all thresholds pass); reducer 96.29%
 ```
 

@@ -18,6 +18,8 @@
     "smoke:e2e": "tsx scripts/smoke-e2e.ts",
     "serve:ingest": "tsx -e \"import { createIngestServer } from './packages/ingest-service/src/index.ts'; (async () => { const s = await createIngestServer(); await s.listen({ host: '127.0.0.1', port: 7070 }); console.log('INGEST_READY http://127.0.0.1:7070'); })();\"",
     "emit:event": "tsx scripts/emit-event-cli.ts",
+    "session:list": "tsx scripts/export-session-store.ts",
+    "session:export": "tsx scripts/export-session-store.ts",
     "bootstrap:repo": "tsx scripts/bootstrap-existing-repo.ts",
     "unbootstrap:repo": "tsx scripts/unbootstrap-existing-repo.ts",
     "replay:jsonl": "tsx scripts/replay-jsonl.ts",

@@ -4,21 +4,18 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-3c873a?style=flat-square)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-Visualize Copilot agent runtime activity in real time and replay sessions from persisted JSONL logs.
+Explore Copilot session history from local session-store data with a static selector and multi-session analysis dashboard.
 
 > **🎓 This project is also an interactive, hands-on learning experience.**
 > Beyond the visualiser itself, the repo includes guided tutorials and vanilla hook examples that walk you through Copilot CLI hooks from the ground up — starting with raw payloads and progressively adding schema validation, payload enrichment, event synthesis, and the emit pipeline.
 
-![UI overview of the live board, replay controls, filters, and inspector](docs/tutorials/assets/tutorial-screenshots/ui-features/ui-overview.png)
+![UI overview of the session explorer workflow](docs/tutorials/assets/tutorial-screenshots/ui-features/ui-overview.png)
 
 > [!TIP]
-> New reporting flow: export the active session as CSV directly from the header.
-> See the [Reporting Controls](docs/tutorials/ui-feature-showcase.md#reporting-controls) section and screenshot below.
->
-> ![Reporting controls with Export CSV action](docs/tutorials/assets/tutorial-screenshots/ui-features/ui-reporting-export-csv.png)
+> The current default flow is selector-based analysis:
+> list sessions from `~/.copilot/session-store.db`, export one or more sessions to JSON, then load that export in the dashboard.
 
-See the [UI Feature Showcase](docs/tutorials/ui-feature-showcase.md) for a
-panel-by-panel walkthrough of the visualizer interface.
+See the [Session Dashboard Workflow](docs/tutorials/session-dashboard-workflow.md) for a step-by-step operator guide.
 
 ## 🎓 Learning & Tutorials
 
@@ -27,7 +24,8 @@ Start here if you want the practical, step-by-step learning path:
 - **[Tutorial Index](docs/tutorials/README.md)** — choose your track (Bash/Linux or PowerShell) and jump to any tutorial part.
 - **[From Vanilla to Visualizer (Bash/Linux)](docs/tutorials/from-vanilla-to-visualizer.md)** — six-part walkthrough from raw hooks to full pipeline.
 - **[From Vanilla to Visualizer (PowerShell)](docs/tutorials/from-vanilla-to-visualizer-ps1.md)** — PowerShell-focused version of the same journey.
-- **[UI Feature Showcase](docs/tutorials/ui-feature-showcase.md)** — screenshot tour of the live board, replay controls, filters, pairing diagnostics, and inspector.
+- **[Session Dashboard Workflow](docs/tutorials/session-dashboard-workflow.md)** — selector, export, and dashboard analysis flow.
+- **[UI Feature Showcase](docs/tutorials/ui-feature-showcase.md)** — screenshot tour of the visualizer interface.
 - **[Multi-Agent Build Visualization](docs/tutorials/multi-agent-build-visualization.md)** — short recording that shows a full multi-agent build and live visualizer feedback.
 - **[Vanilla Hook Examples](docs/examples/vanilla-hooks/)** — minimal `.sh` + `.ps1` scripts for all 8 hook types.
 - **[Hooked on Hooks](docs/hooked-on-hooks.md)** — practical patterns and lessons learned building this visualiser.
@@ -36,31 +34,19 @@ The project is complete for the planned MVP scope:
 - Foundation Event Capture
 - Deterministic State Engine
 - Privacy Retention and Export Controls
-- Live Visualization Board
-- Replay and Session Review
+- Static Session Selector and Dashboard
+- Multi-Session Export and Session Review
 
 ## Features
 
-- Canonical event schema with validation and malformed-record rejection
-- Hook emitter with JSONL persistence and optional HTTP event forwarding
-- Deterministic state machine with rebuild-from-log support
-- Live board UI with lane mapping, event inspector, and idle-aware Gantt chart
-- Idle gap visualization — dashed segments on the Gantt timeline show periods between tool invocations
-- Pulsing lane status dots for running and subagent-running states
-- Event list auto-scroll with user-scroll-override detection
-- Replay mode with timeline scrubbing, speed controls, first-failure jump, and header badge
-- Bulk filter controls (Select All / Clear All) for event type checkboxes
-- Redaction and retention controls with safe defaults
-- Existing-repo bootstrap with automatic hook wiring for common lifecycle scripts
-- Enriched tool event payloads (when provided by host hooks): tool args, agent context, and optional skill metadata
-- Synthesized subagent lifecycle from task dispatch metadata (`toolArgs.agent_type`): start on task completion, stop on `agentStop`
-- CSV session export — one-click download of all session events as a CSV file with RFC 4180 escaping
-- Reporting docs and screenshot — see [UI Feature Showcase: Reporting Controls](docs/tutorials/ui-feature-showcase.md#reporting-controls)
-- Live feed pause/resume — freeze the display for inspection without losing incoming events; resume flushes buffered state
-- Concurrent tool tracking — visualises parallel tool execution with `activeTools` state and parallel batch collapse
-- Intent phase markers — extracts `report_intent` calls to show workflow phase progression
-- Wait state differentiation — distinct `waiting_for_user` and `waiting_for_agent` visual states (vs generic idle)
-- Session analytics — time breakdown (tool/LLM/user/agent split) and per-tool distribution from event streams
+- Session-store export CLI for listing and exporting selected sessions
+- Session selector UI with search, sort, bulk selection, and export command generation
+- Static dashboard UI with tabs for overview, checkpoints, turns, files, models/tokens, and full-text search
+- Combined and per-session JSON export modes
+- Optional export redaction toggle using shared pattern redaction rules
+- FTS5-safe fallback behavior for environments where SQLite FTS5 is unavailable
+- Existing-repo bootstrap/unbootstrap tooling for hook capture workflows
+- JSONL replay tooling for ingest-service and legacy event-stream workflows
 
 ## Getting Started
 
@@ -76,40 +62,52 @@ npm run typecheck
 npm run test
 ```
 
-### Run the Visualiser
+### Session Dashboard Quickstart
 
 ```bash
-# terminal 1 (from this repo)
-npm run serve:ingest
+# 1) List available sessions from ~/.copilot/session-store.db
+npm run session:list -- --json ./session-list.json
 
-# terminal 2 (from this repo)
+# 2) Start the web UI
 npm run dev --workspace=packages/web-ui
+
+# 3) Optional: export specific sessions for dashboard loading
+npm run session:export -- --ids <session-id-1,session-id-2> --out ./session-store-export.json --split --split-dir ./session-exports
 ```
 
 Open `http://127.0.0.1:5173`.
 
-> [!TIP]
-> Use `npm run smoke:e2e` to run a full emitter -> ingest -> state-stream runtime verification.
+In the app:
 
-### 2-Minute Local Demo
+1. Use Session Selector to load `session-list.json`.
+2. Select one or more sessions and copy the generated export command.
+3. Use Session Dashboard to load `session-store-export.json` (combined) or a single split file.
 
-With ingest and web UI running, emit two events into a throwaway session:
+### Export Modes
+
+Combined export:
 
 ```bash
-SESSION_ID="demo-$(date +%s)"
-npm run emit:event -- --eventType sessionStart --payload '{}' --sessionId "$SESSION_ID" --repoPath "$PWD" --jsonlPath "$PWD/.tmp/demo-session.jsonl" --httpEndpoint "http://127.0.0.1:7070/events"
-npm run emit:event -- --eventType userPromptSubmitted --payload '{"prompt":"Run a quick visualizer demo"}' --sessionId "$SESSION_ID" --repoPath "$PWD" --jsonlPath "$PWD/.tmp/demo-session.jsonl" --httpEndpoint "http://127.0.0.1:7070/events"
+npm run session:export -- --ids <session-id-1,session-id-2> --out ./session-store-export.json
 ```
 
-You should immediately see the new session and prompt event appear in the live UI.
+Split per-session export:
 
-> [!NOTE]
-> If you only want offline capture, keep the same commands but omit `--httpEndpoint`. Events will still be persisted to JSONL.
+```bash
+npm run session:export -- --ids <session-id-1,session-id-2> --split --split-dir ./session-exports
+```
 
-### Troubleshooting Local Startup
+Optional redaction:
 
-- If `npm run serve:ingest` exits immediately, ensure Node.js `>=24` (`node -v`) and confirm port `7070` is free (`lsof -i :7070`).
-- If the web UI starts but no events appear, check ingest is listening on `http://127.0.0.1:7070`, verify emit commands include the same `--httpEndpoint`, and inspect JSONL output under `.tmp/` or `.visualizer/logs/`.
+```bash
+npm run session:export -- --ids <session-id-1,session-id-2> --out ./session-store-export.json --redact
+```
+
+### Troubleshooting Session Explorer
+
+- If `session:list` fails, verify `sqlite3` is installed and `~/.copilot/session-store.db` exists.
+- If `session:export` fails with unknown session IDs, regenerate `session-list.json` and copy IDs directly from that file.
+- If model/token extraction is sparse, your local sqlite build may not include FTS5; exporter fallback still works using turns/checkpoints/files/refs text.
 
 ## Integrate an Existing Repo
 
@@ -236,8 +234,8 @@ The `visualizer-hooks.json` manifest created during bootstrap is the canonical s
 ## Package Layout
 
 - `packages/hook-emitter`: emit + persist validated events
-- `packages/ingest-service`: Fastify ingest API + SSE state stream
-- `packages/web-ui`: React/Vite live board and replay UI
+- `packages/ingest-service`: Fastify ingest API + SSE state stream (legacy/live path)
+- `packages/web-ui`: React/Vite static session selector and dashboard UI
 - `shared/event-schema`: canonical event envelope + parser
 - `shared/state-machine`: deterministic reducer and state rebuild
 - `shared/redaction`: redaction, retention, and export controls
@@ -247,6 +245,8 @@ The `visualizer-hooks.json` manifest created during bootstrap is the canonical s
 ```bash
 npm run test
 npm run test:watch
+npm run session:list -- --json ./session-list.json
+npm run session:export -- --ids <session-id-1,session-id-2> --out ./session-store-export.json
 npm run smoke:e2e
 npm run bootstrap:repo -- /absolute/path/to/target-repo
 npm run unbootstrap:repo -- /absolute/path/to/target-repo
