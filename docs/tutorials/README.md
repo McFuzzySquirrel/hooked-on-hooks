@@ -1,4 +1,12 @@
-# Tutorials
+# Tutorials (Archived Legacy)
+
+These tutorials are preserved for historical/reference use and are no longer the primary onboarding path.
+
+For current operational workflows, start with:
+
+- [Repository README](../../README.md) for capture/import/export/dashboard commands
+- [Session Dashboard Pathway](../pathways/session-dashboard/README.md) for `.copilot` session-store analysis
+- [Hook Pipeline Pathway](../pathways/hook-pipeline/README.md) for live Copilot CLI hook capture
 
 This index helps you choose a tutorial track and jump directly to any part.
 

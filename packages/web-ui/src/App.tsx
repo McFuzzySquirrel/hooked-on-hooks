@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   DashboardTab,
   SessionExportData,
@@ -6,6 +6,7 @@ import type {
   SortMode,
 } from "./types.js";
 import {
+  classifySessionSource,
   formatBytes,
   formatDate,
   normalizeSessionExport,
@@ -40,8 +41,64 @@ const TAB_LABELS: Array<{ id: DashboardTab; label: string }> = [
   { id: "search", label: "Search" },
 ];
 
+type SourceFilter = "all" | "copilot-cli" | "vscode-chat" | "unknown";
+const SOURCE_FILTERS: SourceFilter[] = ["all", "copilot-cli", "vscode-chat", "unknown"];
+
+function readSourceFilterFromUrl(): SourceFilter {
+  if (typeof window === "undefined") {
+    return "all";
+  }
+
+  const value = new URLSearchParams(window.location.search).get("source");
+  if (!value) {
+    return "all";
+  }
+
+  return SOURCE_FILTERS.includes(value as SourceFilter) ? (value as SourceFilter) : "all";
+}
+
+function writeSourceFilterToUrl(filter: SourceFilter): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  if (filter === "all") {
+    params.delete("source");
+  } else {
+    params.set("source", filter);
+  }
+
+  const next = params.toString();
+  const path = window.location.pathname;
+  const hash = window.location.hash;
+  const url = `${path}${next ? `?${next}` : ""}${hash}`;
+  window.history.replaceState(null, "", url);
+}
+
 function readJsonFile(file: File): Promise<unknown> {
-  return file.text().then((text) => JSON.parse(text) as unknown);
+  return file.text().then((text) => {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const looksLikeJsonl =
+        lines.length > 1
+        && lines.every((line) => line.startsWith("{") || line.startsWith("["));
+
+      if (looksLikeJsonl) {
+        throw new Error(
+          "This file looks like JSONL (multiple JSON objects). The dashboard uploader expects a single export JSON file. Use npm run session:export to generate dashboard JSON.",
+        );
+      }
+
+      throw new Error("Invalid JSON file");
+    }
+  });
 }
 
 export function App() {
@@ -55,6 +112,7 @@ export function App() {
   const [exportData, setExportData] = useState<SessionExportData>(EMPTY_EXPORT);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [dashboardFilter, setDashboardFilter] = useState("");
+  const [dashboardSourceFilter, setDashboardSourceFilter] = useState<SourceFilter>(() => readSourceFilterFromUrl());
   const [tab, setTab] = useState<DashboardTab>("overview");
   const [contentSearch, setContentSearch] = useState("");
   const [dashboardError, setDashboardError] = useState("");
@@ -104,19 +162,47 @@ export function App() {
 
   const dashboardSessions = useMemo(() => {
     const q = dashboardFilter.trim().toLowerCase();
-    const base = exportData.sessions;
-    if (!q) {
-      return base;
-    }
-    return base.filter((session) => {
+    const sourceType = exportData.source.type;
+
+    return exportData.sessions.filter((session) => {
+      const source = classifySessionSource(session, sourceType);
+      if (dashboardSourceFilter !== "all" && source !== dashboardSourceFilter) {
+        return false;
+      }
+
+      if (!q) {
+        return true;
+      }
+
       return (
         session.summary.toLowerCase().includes(q) ||
         session.repository.toLowerCase().includes(q) ||
         session.branch.toLowerCase().includes(q) ||
-        session.sessionId.toLowerCase().includes(q)
+        session.sessionId.toLowerCase().includes(q) ||
+        source.includes(q)
       );
     });
-  }, [dashboardFilter, exportData.sessions]);
+  }, [dashboardFilter, dashboardSourceFilter, exportData.sessions, exportData.source.type]);
+
+  const sourceBreakdown = useMemo(() => {
+    const totals = {
+      all: exportData.sessions.length,
+      "copilot-cli": 0,
+      "vscode-chat": 0,
+      unknown: 0,
+    };
+
+    for (const session of exportData.sessions) {
+      const source = classifySessionSource(session, exportData.source.type);
+      totals[source] += 1;
+    }
+
+    return totals;
+  }, [exportData.sessions, exportData.source.type]);
+
+  useEffect(() => {
+    writeSourceFilterToUrl(dashboardSourceFilter);
+  }, [dashboardSourceFilter]);
 
   const activeSession = useMemo(() => {
     if (dashboardSessions.length === 0) {
@@ -211,6 +297,10 @@ export function App() {
 
   function clearSelected(): void {
     setSelectedIds(new Set());
+  }
+
+  function sessionSourceLabel(session: SessionExportData["sessions"][number]): "copilot-cli" | "vscode-chat" | "unknown" {
+    return classifySessionSource(session, exportData.source.type);
   }
 
   return (
@@ -345,6 +435,36 @@ export function App() {
               value={dashboardFilter}
               onChange={(event) => setDashboardFilter(event.target.value)}
             />
+            <div className="source-filter-row">
+              <button
+                type="button"
+                onClick={() => setDashboardSourceFilter("all")}
+                disabled={dashboardSourceFilter === "all"}
+              >
+                All ({sourceBreakdown.all})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardSourceFilter("copilot-cli")}
+                disabled={dashboardSourceFilter === "copilot-cli"}
+              >
+                CLI ({sourceBreakdown["copilot-cli"]})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardSourceFilter("vscode-chat")}
+                disabled={dashboardSourceFilter === "vscode-chat"}
+              >
+                VS Code Chat ({sourceBreakdown["vscode-chat"]})
+              </button>
+              <button
+                type="button"
+                onClick={() => setDashboardSourceFilter("unknown")}
+                disabled={dashboardSourceFilter === "unknown"}
+              >
+                Unknown ({sourceBreakdown.unknown})
+              </button>
+            </div>
             {dashboardError ? <p className="error-text">{dashboardError}</p> : null}
             <ul className="session-list">
               {dashboardSessions.map((session) => (
@@ -355,6 +475,7 @@ export function App() {
                     onClick={() => setActiveSessionId(session.sessionId)}
                   >
                     <strong>{session.repository}</strong>
+                    <span className={`source-badge source-${sessionSourceLabel(session)}`}>{sessionSourceLabel(session)}</span>
                     <span>{session.branch}</span>
                     <small className="mono">{session.sessionId}</small>
                   </button>
@@ -402,6 +523,12 @@ export function App() {
                       <dd>{activeSession.branch}</dd>
                       <dt>Host Type</dt>
                       <dd>{activeSession.hostType}</dd>
+                      <dt>Session Source</dt>
+                      <dd>
+                        <span className={`source-badge source-${sessionSourceLabel(activeSession)}`}>
+                          {sessionSourceLabel(activeSession)}
+                        </span>
+                      </dd>
                       <dt>Working Dir</dt>
                       <dd className="mono">{activeSession.cwd || "n/a"}</dd>
                       <dt>Events</dt>

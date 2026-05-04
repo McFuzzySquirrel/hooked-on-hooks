@@ -179,6 +179,87 @@ export function reduceEvent(state: SessionState, event: EventEnvelope): SessionS
     case "errorOccurred":
       return { ...next, visualization: "error" };
 
+    case "chatSessionStart":
+      return {
+        ...next,
+        lifecycle: "active",
+        visualization: "idle",
+        startedAt: next.startedAt ?? event.timestamp,
+      };
+
+    case "chatSessionEnd":
+      return {
+        ...next,
+        lifecycle: "completed",
+        visualization: "idle",
+        endedAt: event.timestamp,
+      };
+
+    case "chatMessage":
+      if (event.payload.role === "user") {
+        return {
+          ...next,
+          turnCount: next.turnCount + 1,
+          currentTurnStartTime: event.timestamp,
+        };
+      }
+      return next;
+
+    case "chatToolCall": {
+      if (event.payload.status === "started") {
+        const toolInfo: ToolInfo = {
+          toolName: event.payload.toolName,
+          durationMs: event.payload.durationMs,
+          errorSummary: event.payload.errorSummary,
+          eventId: event.eventId,
+          toolCallId: event.payload.toolCallId,
+          startedAt: event.timestamp,
+        };
+
+        return {
+          ...next,
+          visualization: "tool_running",
+          currentTool: toolInfo,
+          activeTools: { ...next.activeTools, [event.eventId]: toolInfo },
+        };
+      }
+
+      if (event.payload.status === "failed") {
+        const { activeTools: remaining, matched } = removeMatchingChatTool(next.activeTools, event);
+        return {
+          ...next,
+          visualization: "error",
+          currentTool: {
+            toolName: event.payload.toolName,
+            durationMs: event.payload.durationMs,
+            errorSummary: event.payload.errorSummary,
+            eventId: matched?.eventId,
+            toolCallId: event.payload.toolCallId,
+            startedAt: matched?.startedAt,
+          },
+          activeTools: remaining,
+        };
+      }
+
+      const { activeTools: remaining, matched } = removeMatchingChatTool(next.activeTools, event);
+      const activeCount = Object.keys(remaining).length;
+      return {
+        ...next,
+        visualization: activeCount > 0 ? "tool_running" : "tool_succeeded",
+        currentTool: {
+          toolName: event.payload.toolName,
+          durationMs: event.payload.durationMs,
+          eventId: matched?.eventId,
+          toolCallId: event.payload.toolCallId,
+          startedAt: matched?.startedAt,
+        },
+        activeTools: remaining,
+      };
+    }
+
+    case "chatArtifactImported":
+      return next;
+
     default: {
       // Exhaustiveness guard — TypeScript will error here if a new event type
       // is added to EventEnvelope without a corresponding case above.
@@ -216,6 +297,32 @@ function removeMatchingTool(
     const remaining = { ...activeTools };
     delete remaining[match[0]];
     return { activeTools: remaining, matched: match[1] };
+  }
+
+  return { activeTools, matched: null };
+}
+
+function removeMatchingChatTool(
+  activeTools: Record<string, ToolInfo>,
+  event: Extract<EventEnvelope, { eventType: "chatToolCall" }>,
+): { activeTools: Record<string, ToolInfo>; matched: ToolInfo | null } {
+  const entries = Object.entries(activeTools);
+  const toolCallId = event.payload.toolCallId;
+
+  if (toolCallId) {
+    const byId = entries.find(([, info]) => info.toolCallId === toolCallId);
+    if (byId) {
+      const remaining = { ...activeTools };
+      delete remaining[byId[0]];
+      return { activeTools: remaining, matched: byId[1] };
+    }
+  }
+
+  const byName = entries.find(([, info]) => info.toolName === event.payload.toolName);
+  if (byName) {
+    const remaining = { ...activeTools };
+    delete remaining[byName[0]];
+    return { activeTools: remaining, matched: byName[1] };
   }
 
   return { activeTools, matched: null };

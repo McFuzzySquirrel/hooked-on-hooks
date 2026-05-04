@@ -11,6 +11,7 @@
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 function fail(message: string): never {
   console.error(`replay-jsonl error: ${message}`);
@@ -25,7 +26,7 @@ function usage(): string {
   ].join("\n");
 }
 
-function parseArgs(argv: string[]): { jsonlPath: string; endpoint: string } {
+export function parseArgs(argv: string[]): { jsonlPath: string; endpoint: string } {
   const jsonlPath = argv[0];
   if (!jsonlPath || jsonlPath.startsWith("--")) {
     console.log(usage());
@@ -39,11 +40,17 @@ function parseArgs(argv: string[]): { jsonlPath: string; endpoint: string } {
   return { jsonlPath: resolve(jsonlPath), endpoint };
 }
 
-async function main(): Promise<void> {
-  const { jsonlPath, endpoint } = parseArgs(process.argv.slice(2));
+export interface ReplayResult {
+  sent: number;
+  rejected: number;
+  errors: number;
+}
+
+export async function replayJsonl(jsonlPath: string, endpoint: string): Promise<ReplayResult> {
+  const resolvedPath = resolve(jsonlPath);
 
   const rl = createInterface({
-    input: createReadStream(jsonlPath, "utf8"),
+    input: createReadStream(resolvedPath, "utf8"),
     crlfDelay: Infinity,
   });
 
@@ -73,10 +80,8 @@ async function main(): Promise<void> {
       const body = await res.json() as { ok: boolean; error?: string };
       if (body.ok) {
         sent += 1;
-        process.stdout.write(".");
       } else {
         rejected += 1;
-        console.warn(`\n  REJECTED: ${body.error ?? "unknown"}`);
       }
     } catch (err) {
       fail(
@@ -85,7 +90,19 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log(`\nDone: ${sent} accepted, ${rejected} rejected, ${errors} parse errors`);
+  return { sent, rejected, errors };
 }
 
-void main();
+async function main(): Promise<void> {
+  const { jsonlPath, endpoint } = parseArgs(process.argv.slice(2));
+  const result = await replayJsonl(jsonlPath, endpoint);
+  console.log(`Done: ${result.sent} accepted, ${result.rejected} rejected, ${result.errors} parse errors`);
+}
+
+const isDirectRun = process.argv[1]
+  ? import.meta.url === pathToFileURL(process.argv[1]).href
+  : false;
+
+if (isDirectRun) {
+  void main();
+}

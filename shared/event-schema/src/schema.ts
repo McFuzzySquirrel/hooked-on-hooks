@@ -13,7 +13,12 @@ export const EVENT_TYPES = [
   "subagentStop",
   "agentStop",
   "notification",
-  "errorOccurred"
+  "errorOccurred",
+  "chatSessionStart",
+  "chatSessionEnd",
+  "chatMessage",
+  "chatToolCall",
+  "chatArtifactImported"
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
@@ -24,7 +29,7 @@ const BaseEnvelope = z.object({
   eventType: z.enum(EVENT_TYPES),
   timestamp: z.string().datetime({ offset: true }),
   sessionId: z.string().min(1),
-  source: z.literal("copilot-cli"),
+  source: z.enum(["copilot-cli", "vscode-chat", "vscode-chat-debug"]),
   repoPath: z.string().min(1),
   turnId: z.string().min(1).optional(),
   traceId: z.string().min(1).optional(),
@@ -86,6 +91,40 @@ const PayloadSchemas = {
   errorOccurred: z.object({
     message: z.string().min(1),
     code: z.string().optional()
+  }).catchall(z.unknown()),
+  chatSessionStart: z.object({
+    workspaceSessionId: z.string().min(1).optional(),
+    title: z.string().optional(),
+    initialLocation: z.string().optional()
+  }).catchall(z.unknown()),
+  chatSessionEnd: z.object({
+    reason: z.string().optional()
+  }).catchall(z.unknown()),
+  chatMessage: z.object({
+    role: z.enum(["user", "assistant", "system"]),
+    text: z.string().optional(),
+    requestId: z.string().optional(),
+    model: z.string().optional(),
+    inputTokens: z.number().int().nonnegative().optional(),
+    outputTokens: z.number().int().nonnegative().optional(),
+    totalTokens: z.number().int().nonnegative().optional(),
+    requestDurationMs: z.number().int().nonnegative().optional(),
+    timeToFirstTokenMs: z.number().int().nonnegative().optional()
+  }).catchall(z.unknown()),
+  chatToolCall: z.object({
+    toolName: z.string().min(1),
+    status: z.enum(["started", "completed", "failed"]),
+    durationMs: z.number().int().nonnegative().optional(),
+    errorSummary: z.string().optional(),
+    toolCallId: z.string().min(1).optional(),
+    requestId: z.string().optional(),
+    intentionSummary: z.string().optional()
+  }).catchall(z.unknown()),
+  chatArtifactImported: z.object({
+    artifactType: z.string().min(1),
+    path: z.string().min(1),
+    sizeBytes: z.number().int().nonnegative().optional(),
+    callId: z.string().optional()
   }).catchall(z.unknown())
 };
 
@@ -100,7 +139,12 @@ export const EventEnvelopeSchema = z.discriminatedUnion("eventType", [
   BaseEnvelope.extend({ eventType: z.literal("subagentStop"), payload: PayloadSchemas.subagentStop }),
   BaseEnvelope.extend({ eventType: z.literal("agentStop"), payload: PayloadSchemas.agentStop }),
   BaseEnvelope.extend({ eventType: z.literal("notification"), payload: PayloadSchemas.notification }),
-  BaseEnvelope.extend({ eventType: z.literal("errorOccurred"), payload: PayloadSchemas.errorOccurred })
+  BaseEnvelope.extend({ eventType: z.literal("errorOccurred"), payload: PayloadSchemas.errorOccurred }),
+  BaseEnvelope.extend({ eventType: z.literal("chatSessionStart"), payload: PayloadSchemas.chatSessionStart }),
+  BaseEnvelope.extend({ eventType: z.literal("chatSessionEnd"), payload: PayloadSchemas.chatSessionEnd }),
+  BaseEnvelope.extend({ eventType: z.literal("chatMessage"), payload: PayloadSchemas.chatMessage }),
+  BaseEnvelope.extend({ eventType: z.literal("chatToolCall"), payload: PayloadSchemas.chatToolCall }),
+  BaseEnvelope.extend({ eventType: z.literal("chatArtifactImported"), payload: PayloadSchemas.chatArtifactImported })
 ]);
 
 export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;

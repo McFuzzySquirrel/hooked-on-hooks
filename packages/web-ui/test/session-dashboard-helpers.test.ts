@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifySessionSource,
   formatBytes,
   formatDate,
   normalizeSessionList,
@@ -95,6 +96,32 @@ describe("session dashboard helper functions", () => {
 
     expect(single.sessions).toHaveLength(1);
     expect(single.sessions[0]?.sessionId).toBe("sess-single");
+    expect(single.sessions[0]?.hostType).toBe("github");
+  });
+
+  it("classifies session source kind from host type and export source", () => {
+    const baseSession = {
+      sessionId: "sess-a",
+      summary: "Summary",
+      repository: "owner/repo",
+      branch: "main",
+      cwd: "/tmp/repo",
+      hostType: "github",
+      createdAt: "2026-04-22T20:00:00.000Z",
+      updatedAt: "2026-04-22T21:00:00.000Z",
+      stats: { eventCount: 1, turnCount: 1, checkpointCount: 0, fileCount: 0, refCount: 0, fileSizeBytes: 10 },
+      checkpoints: [],
+      turns: [],
+      files: [],
+      refs: [],
+      modelsAndTokens: { detectedModels: [], tokenMentions: [], notes: [] },
+      searchBlob: [],
+    };
+
+    expect(classifySessionSource(baseSession, "copilot-session-store-db")).toBe("copilot-cli");
+    expect(classifySessionSource({ ...baseSession, hostType: "vscode-chat" }, "copilot-session-store-db")).toBe("vscode-chat");
+    expect(classifySessionSource({ ...baseSession, hostType: "" }, "workspace-storage-chat")).toBe("vscode-chat");
+    expect(classifySessionSource({ ...baseSession, hostType: "local" }, "archive")).toBe("unknown");
   });
 
   it("builds lowercased search text from session fields", () => {

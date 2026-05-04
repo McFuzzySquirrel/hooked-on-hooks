@@ -1,0 +1,7 @@
+{
+    "github.copilot.chat.agentDebugLog.enabled": true,
+    "github.copilot.chat.agentDebugLog.fileLogging.enabled": true,
+    "github.copilot.chat.agentDebugLog.fileLogging.flushIntervalMs": 5000,
+    "github.copilot.chat.agentDebugLog.fileLogging.maxRetainedSessionLogs": 20,
+    "github.copilot.chat.agentDebugLog.fileLogging.maxSessionLogSizeMB": 50
+}

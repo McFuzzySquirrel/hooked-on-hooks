@@ -13,7 +13,7 @@ export interface EmitOptions {
   traceId?: string;
   spanId?: string;
   parentSpanId?: string;
-  source?: "copilot-cli";
+  source?: EventEnvelope["source"];
   httpEndpoint?: string;
   now?: () => string;
   eventIdFactory?: () => string;

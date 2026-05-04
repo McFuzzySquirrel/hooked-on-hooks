@@ -132,6 +132,18 @@ main.dashboard-shell {
   align-items: center;
 }
 
+.source-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.source-filter-row button {
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+}
+
 .file-input-label {
   display: inline-flex;
   flex-direction: column;
@@ -263,6 +275,33 @@ main.dashboard-shell {
   border-color: var(--accent);
   background: rgba(255, 154, 69, 0.12);
   color: #ffe4cb;
+}
+
+.source-badge {
+  display: inline-block;
+  width: fit-content;
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+  font-family: "JetBrains Mono", "Cascadia Code", monospace;
+}
+
+.source-copilot-cli {
+  color: #ffd5aa;
+  background: rgba(255, 154, 69, 0.15);
+}
+
+.source-vscode-chat {
+  color: #aeeaff;
+  background: rgba(56, 189, 248, 0.12);
+}
+
+.source-unknown {
+  color: #d4b9a6;
+  background: rgba(212, 185, 166, 0.14);
 }
 
 .content-header {

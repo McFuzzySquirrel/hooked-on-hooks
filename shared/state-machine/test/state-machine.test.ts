@@ -57,6 +57,12 @@ function buildFullSequence(): EventEnvelope[] {
     makeEvent("errorOccurred",         { message: "fatal error", code: "E1" },        9),
     makeEvent("agentStop",             { agentName: "main-agent" },                   10),
     makeEvent("sessionEnd",            {},                                             11),
+    makeEvent("chatSessionStart",      { workspaceSessionId: SESSION_ID },             12),
+    makeEvent("chatMessage",           { role: "user", text: "hello" },              13),
+    makeEvent("chatToolCall",          { toolName: "read_file", status: "started", toolCallId: "call-1" }, 14),
+    makeEvent("chatToolCall",          { toolName: "read_file", status: "completed", toolCallId: "call-1", durationMs: 12 }, 15),
+    makeEvent("chatArtifactImported",  { artifactType: "tool-call-content", path: "chat/call/content.txt" }, 16),
+    makeEvent("chatSessionEnd",        { reason: "complete" },                        17),
   ];
 }
 
@@ -213,6 +219,47 @@ describe("STAT-FR-01: Transition mapping (Product Vision §10.3)", () => {
     state = reduceEvent(state, makeEvent("notification", { notificationType: "info", title: "T", message: "M" }));
     expect(state.visualization).toBe(beforeViz);
     expect(state.visualization).toBe("tool_running");
+  });
+
+  it("chatSessionStart/chatSessionEnd update lifecycle boundaries", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("chatSessionStart", { workspaceSessionId: SESSION_ID }));
+    expect(state.lifecycle).toBe("active");
+    expect(state.visualization).toBe("idle");
+
+    state = reduceEvent(state, makeEvent("chatSessionEnd", { reason: "complete" }));
+    expect(state.lifecycle).toBe("completed");
+    expect(state.visualization).toBe("idle");
+  });
+
+  it("chatMessage user increments turn count", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("chatSessionStart", { workspaceSessionId: SESSION_ID }));
+    state = reduceEvent(state, makeEvent("chatMessage", { role: "user", text: "hello" }));
+    expect(state.turnCount).toBe(1);
+    expect(state.currentTurnStartTime).toBeTruthy();
+  });
+
+  it("chatToolCall started/completed follows tool visualization semantics", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("chatSessionStart", { workspaceSessionId: SESSION_ID }));
+    state = reduceEvent(state, makeEvent("chatToolCall", { toolName: "read_file", status: "started", toolCallId: "call-1" }));
+    expect(state.visualization).toBe("tool_running");
+    expect(Object.keys(state.activeTools)).toHaveLength(1);
+
+    state = reduceEvent(state, makeEvent("chatToolCall", { toolName: "read_file", status: "completed", toolCallId: "call-1", durationMs: 10 }));
+    expect(state.visualization).toBe("tool_succeeded");
+    expect(Object.keys(state.activeTools)).toHaveLength(0);
+    expect(state.currentTool?.durationMs).toBe(10);
+  });
+
+  it("chatToolCall failed transitions to error", () => {
+    let state = initialSessionState(SESSION_ID);
+    state = reduceEvent(state, makeEvent("chatSessionStart", { workspaceSessionId: SESSION_ID }));
+    state = reduceEvent(state, makeEvent("chatToolCall", { toolName: "bash", status: "started", toolCallId: "call-2" }));
+    state = reduceEvent(state, makeEvent("chatToolCall", { toolName: "bash", status: "failed", toolCallId: "call-2", errorSummary: "boom" }));
+    expect(state.visualization).toBe("error");
+    expect(state.currentTool?.errorSummary).toBe("boom");
   });
 });
 

@@ -23,6 +23,11 @@
     "bootstrap:repo": "tsx scripts/bootstrap-existing-repo.ts",
     "unbootstrap:repo": "tsx scripts/unbootstrap-existing-repo.ts",
     "replay:jsonl": "tsx scripts/replay-jsonl.ts",
+    "import:vscode-chat": "tsx scripts/import-vscode-chat.ts",
+    "refresh:vscode-chat-dashboard": "tsx scripts/import-export-vscode-chat.ts",
+    "refresh:vscode-chat-dashboard:local": "tsx scripts/import-export-vscode-chat.ts --workspaceStorageRoot /home/mcfuzzysquirrel/.config/Code/User/workspaceStorage/01ef85096ab81119bd4d9556f2375eb5 --mode auto",
+    "refresh:copilot-cli-dashboard": "tsx scripts/refresh-copilot-cli-dashboard.ts",
+    "export:jsonl-dashboard": "tsx scripts/export-jsonl-dashboard.ts",
     "check:screenshot-safety": "tsx scripts/check-screenshot-safety.ts",
     "lint": "echo 'Lint config baseline in place'",
     "clean": "rm -rf coverage dist .tmp"

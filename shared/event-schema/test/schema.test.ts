@@ -43,6 +43,16 @@ function payloadFor(eventType: string): Record<string, unknown> {
       return { notificationType: "agent_completed", title: "Done", message: "ok" };
     case "errorOccurred":
       return { message: "error" };
+    case "chatSessionStart":
+      return { workspaceSessionId: "sess-1", title: "Chat" };
+    case "chatSessionEnd":
+      return { reason: "complete" };
+    case "chatMessage":
+      return { role: "user", text: "hello" };
+    case "chatToolCall":
+      return { toolName: "read_file", status: "started", toolCallId: "call-1" };
+    case "chatArtifactImported":
+      return { artifactType: "tool-call-content", path: "chat/session/call.txt", sizeBytes: 42 };
     default:
       return {};
   }
@@ -105,5 +115,22 @@ describe("event schema", () => {
       }
     });
     expect(result.ok).toBe(true);
+  });
+
+  it("accepts VS Code chat sources", () => {
+    const fromChat = parseEvent({
+      ...baseEnvelope("chatMessage"),
+      source: "vscode-chat",
+      payload: { role: "assistant", text: "hello" }
+    });
+
+    const fromDebug = parseEvent({
+      ...baseEnvelope("chatArtifactImported"),
+      source: "vscode-chat-debug",
+      payload: { artifactType: "tool-call-content", path: "x/content.txt" }
+    });
+
+    expect(fromChat.ok).toBe(true);
+    expect(fromDebug.ok).toBe(true);
   });
 });

@@ -1,5 +1,7 @@
 import type { SessionCard, SessionExport, SessionExportData, SessionListData } from "./types.js";
 
+export type SessionSourceKind = "copilot-cli" | "vscode-chat" | "unknown";
+
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "0 B";
@@ -58,18 +60,39 @@ export function normalizeSessionExport(raw: unknown): SessionExportData {
     throw new Error("Invalid export JSON");
   }
   const record = raw as Record<string, unknown>;
-  const sessions = Array.isArray(record.sessions)
+  const sourceType = String((record.source as Record<string, unknown> | undefined)?.type ?? "unknown");
+  const sessions = (Array.isArray(record.sessions)
     ? (record.sessions as SessionExport[])
-    : [record as unknown as SessionExport];
+    : [record as unknown as SessionExport])
+    .map((session) => ({
+      ...session,
+      hostType: typeof session.hostType === "string" ? session.hostType : sourceType,
+    }));
 
   return {
     exportedAt: String(record.exportedAt ?? ""),
     source: {
-      type: String((record.source as Record<string, unknown> | undefined)?.type ?? "unknown"),
+      type: sourceType,
       dbPath: String((record.source as Record<string, unknown> | undefined)?.dbPath ?? ""),
     },
     sessions,
   };
+}
+
+export function classifySessionSource(session: SessionExport, exportSourceType?: string): SessionSourceKind {
+  const values = [session.hostType, exportSourceType]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .map((value) => value.toLowerCase());
+
+  if (values.some((value) => value.includes("vscode") || value.includes("chat"))) {
+    return "vscode-chat";
+  }
+
+  if (values.some((value) => value.includes("copilot") || value.includes("cli") || value.includes("github"))) {
+    return "copilot-cli";
+  }
+
+  return "unknown";
 }
 
 export function buildSessionSearchText(session: SessionExport): string {

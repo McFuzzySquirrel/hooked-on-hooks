@@ -24,6 +24,16 @@ describe("hook emitter", () => {
         ? { notificationType: "done", title: "Done", message: "Done" }
         : eventType === "errorOccurred"
         ? { message: "oops" }
+        : eventType === "chatSessionStart"
+        ? { workspaceSessionId: "session-1", title: "chat" }
+        : eventType === "chatSessionEnd"
+        ? { reason: "complete" }
+        : eventType === "chatMessage"
+        ? { role: "user", text: "hello" }
+        : eventType === "chatToolCall"
+        ? { toolName: "read_file", status: "started", toolCallId: "call-1" }
+        : eventType === "chatArtifactImported"
+        ? { artifactType: "tool-call-content", path: "chat/call/content.txt" }
         : eventType === "userPromptSubmitted"
         ? { prompt: "secret prompt" }
         : {};
