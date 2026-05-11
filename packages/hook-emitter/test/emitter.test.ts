@@ -106,4 +106,85 @@ describe("hook emitter", () => {
 
     await rm(dir, { recursive: true, force: true });
   });
+
+  it("emits hybrid envelope metadata and normalized facets by default", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "emitter-"));
+    const jsonlPath = join(dir, "events.jsonl");
+
+    const result = await emitEvent(
+      "preToolUse",
+      { toolName: "task", toolArgs: { agent_type: "qa-engineer" } },
+      {
+        jsonlPath,
+        repoPath: "/tmp/repo",
+        sessionId: "session-1",
+        sourceVersion: "0.1.0",
+        userId: "user-1",
+        machineId: "machine-1",
+        workspaceId: "workspace-1",
+        privacy: { classification: "confidential" },
+        confidence: "inferred"
+      }
+    );
+
+    expect(result.accepted).toBe(true);
+    const record = JSON.parse((await readFile(jsonlPath, "utf8")).trim()) as {
+      sourceVersion: string;
+      userId: string;
+      machineId: string;
+      workspaceId: string;
+      privacy: { classification: string; locallyRedacted: boolean; rawPayloadOptIn: boolean };
+      confidence: string;
+      facets: { toolCalls: Array<{ toolName: string; category: string; status: string; confidence: string }> };
+      rawPayload?: unknown;
+    };
+
+    expect(record.sourceVersion).toBe("0.1.0");
+    expect(record.userId).toBe("user-1");
+    expect(record.machineId).toBe("machine-1");
+    expect(record.workspaceId).toBe("workspace-1");
+    expect(record.privacy.classification).toBe("confidential");
+    expect(record.privacy.locallyRedacted).toBe(true);
+    expect(record.privacy.rawPayloadOptIn).toBe(false);
+    expect(record.confidence).toBe("inferred");
+    expect(record.facets.toolCalls[0]).toMatchObject({
+      toolName: "task",
+      category: "subagent_task_launch",
+      status: "requested"
+    });
+    expect(record.rawPayload).toBeUndefined();
+
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("only stores locally redacted raw payload when explicitly requested", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "emitter-"));
+    const jsonlPath = join(dir, "events.jsonl");
+
+    const result = await emitEvent(
+      "userPromptSubmitted",
+      { prompt: "token ghp_1234567890abcdef1234567890abcdef1234" },
+      {
+        jsonlPath,
+        repoPath: "/tmp/repo",
+        sessionId: "session-1",
+        includeRawPayload: true,
+        storePrompts: true
+      }
+    );
+
+    expect(result.accepted).toBe(true);
+    const record = JSON.parse((await readFile(jsonlPath, "utf8")).trim()) as {
+      payload: { prompt?: string };
+      privacy: { rawPayloadOptIn: boolean };
+      rawPayload?: { redacted: boolean; payload: { prompt?: string } };
+    };
+
+    expect(record.payload.prompt).toBe("[REDACTED_PROMPT]");
+    expect(record.rawPayload?.redacted).toBe(true);
+    expect(record.rawPayload?.payload.prompt).toBe("[REDACTED_PROMPT]");
+    expect(record.privacy.rawPayloadOptIn).toBe(true);
+
+    await rm(dir, { recursive: true, force: true });
+  });
 });

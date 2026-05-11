@@ -2,7 +2,9 @@
 
 ## Scope
 
-Define the canonical event format for live visualization and replay.
+Define the canonical event format for live visualization and replay. The schema
+uses a stable envelope plus normalized filtering facets while keeping
+source-specific payloads flexible.
 
 ## Envelope
 
@@ -15,8 +17,36 @@ Each event record is a single JSON object.
   "eventType": "preToolUse",
   "timestamp": "2026-04-12T20:55:31.123Z",
   "sessionId": "string",
+  "userId": "unknown",
+  "machineId": "unknown",
   "source": "copilot-cli",
+  "sourceVersion": "unknown",
   "repoPath": "/abs/path/to/repo",
+  "workspaceId": "workspace-or-repo-id",
+  "workspacePath": "/abs/path/to/workspace",
+  "privacy": {
+    "classification": "internal",
+    "locallyRedacted": true,
+    "rawPayloadOptIn": false,
+    "retention": "standard"
+  },
+  "confidence": "exact",
+  "facets": {
+    "toolCalls": [],
+    "modelUsage": [],
+    "tokenUsage": [],
+    "contextWindow": [],
+    "agentActivity": [],
+    "subagentActivity": [],
+    "debugEvents": [],
+    "filesTouched": [],
+    "errors": []
+  },
+  "rawPayload": {
+    "redacted": true,
+    "retainedFor": "debug",
+    "payload": {}
+  },
   "turnId": "turn-optional",
   "traceId": "trace-optional",
   "spanId": "span-optional",
@@ -32,9 +62,79 @@ Each event record is a single JSON object.
 - `eventType`
 - `timestamp`
 - `sessionId`
+- `userId`
+- `machineId`
 - `source`
+- `sourceVersion`
 - `repoPath`
+- `workspaceId`
+- `privacy`
+- `confidence`
+- `facets`
 - `payload`
+
+Older `1.0.0` logs that do not contain the newer fields are normalized during
+ingestion with safe defaults (`unknown` identity, `internal` classification,
+empty facets). New emitters should always write the complete envelope.
+
+## Source Adapters
+
+`source` identifies the producer family. Supported values are:
+
+- `copilot-cli`
+- `vscode`
+- `unknown`
+
+`sourceVersion` identifies the source-side payload version. Payloads remain
+source-specific and additive: unknown payload and envelope fields must be
+retained by parsers and ignored by consumers that do not understand them.
+
+## Privacy and Local Filtering
+
+The emitter performs local redaction before JSONL persistence or HTTP delivery.
+The `privacy` block records the classification and whether local redaction was
+applied. Raw or semi-raw payload capture is opt-in only; when enabled,
+`rawPayload.payload` must be locally redacted and retained only for replay/debug
+use.
+
+Central filtering and analytics may reclassify records later, but central
+filtering is not a substitute for local filtering because payloads can contain
+prompts, credentials, file paths, or other sensitive data.
+
+## Facets
+
+Facets are normalized indexes extracted from flexible payloads so downstream
+filtering does not need to understand every source-specific payload shape:
+
+- `toolCalls`
+- `modelUsage`
+- `tokenUsage`
+- `contextWindow`
+- `agentActivity`
+- `subagentActivity`
+- `debugEvents`
+- `filesTouched`
+- `errors`
+
+Tool calls are classified rather than modeled as one rigid event shape. Valid
+tool categories are:
+
+- `shell_command`
+- `editor_action`
+- `mcp_tool_invocation`
+- `agent_delegation`
+- `subagent_task_launch`
+- `debug_command`
+- `file_mutation`
+- `model_function_call`
+- `unknown`
+
+Every event and classified facet can carry confidence metadata:
+
+- `exact`
+- `inferred`
+- `heuristic`
+- `unknown`
 
 ## Optional Correlation Fields (Tracing v2 Phase A)
 

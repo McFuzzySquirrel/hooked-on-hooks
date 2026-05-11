@@ -1,7 +1,28 @@
-import { EventEnvelopeSchema, EVENT_TYPES, SCHEMA_VERSION, type EventEnvelope } from "./schema.js";
+import {
+  EventEnvelopeSchema,
+  EVENT_TYPES,
+  EVENT_SOURCES,
+  SCHEMA_VERSION,
+  buildEventFacets,
+  type ConfidenceLevel,
+  type EventEnvelope,
+  type EventFacets,
+  type EventSource,
+  type PrivacyClassification,
+  type PrivacyMetadata,
+  type ToolCallCategory
+} from "./schema.js";
 
-export { EVENT_TYPES, SCHEMA_VERSION, EventEnvelopeSchema };
-export type { EventEnvelope };
+export { EVENT_TYPES, EVENT_SOURCES, SCHEMA_VERSION, EventEnvelopeSchema, buildEventFacets };
+export type {
+  ConfidenceLevel,
+  EventEnvelope,
+  EventFacets,
+  EventSource,
+  PrivacyClassification,
+  PrivacyMetadata,
+  ToolCallCategory
+};
 
 export type ParseResult =
   | { ok: true; value: EventEnvelope }

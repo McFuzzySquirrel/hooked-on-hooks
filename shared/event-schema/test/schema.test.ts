@@ -106,4 +106,68 @@ describe("event schema", () => {
     });
     expect(result.ok).toBe(true);
   });
+
+  it("normalizes legacy envelopes into the stable hybrid envelope", () => {
+    const result = parseEvent({
+      ...baseEnvelope("sessionStart"),
+      payload: {}
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sourceVersion).toBe("unknown");
+      expect(result.value.userId).toBe("unknown");
+      expect(result.value.machineId).toBe("unknown");
+      expect(result.value.workspaceId).toBe("unknown");
+      expect(result.value.privacy.classification).toBe("internal");
+      expect(result.value.confidence).toBe("exact");
+      expect(result.value.facets.toolCalls).toEqual([]);
+    }
+  });
+
+  it("accepts source-specific payloads and keeps unknown envelope fields", () => {
+    const result = parseEvent({
+      ...baseEnvelope("notification"),
+      source: "vscode",
+      sourceVersion: "1.99.0",
+      workspaceId: "workspace-1",
+      payload: { notificationType: "info", title: "VS Code", message: "ok", vscodeOnly: true },
+      extraEnvelopeField: "future"
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.source).toBe("vscode");
+      expect((result.value as unknown as Record<string, unknown>).extraEnvelopeField).toBe("future");
+      expect((result.value.payload as Record<string, unknown>).vscodeOnly).toBe(true);
+    }
+  });
+
+  it("accepts normalized facets, tool classifications, and confidence metadata", () => {
+    const result = parseEvent({
+      ...baseEnvelope("preToolUse"),
+      sourceVersion: "0.1.0",
+      userId: "user-1",
+      machineId: "machine-1",
+      workspaceId: "workspace-1",
+      privacy: { classification: "confidential", locallyRedacted: true },
+      confidence: "inferred",
+      facets: {
+        toolCalls: [{
+          toolName: "task",
+          category: "subagent_task_launch",
+          status: "requested",
+          confidence: "inferred"
+        }]
+      },
+      payload: { toolName: "task", toolArgs: { agent_type: "qa-engineer" } }
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.privacy.classification).toBe("confidential");
+      expect(result.value.facets.toolCalls[0]?.category).toBe("subagent_task_launch");
+      expect(result.value.confidence).toBe("inferred");
+    }
+  });
 });

@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PassThrough } from "node:stream";
 import Fastify, { type FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import { parseEvent, type EventEnvelope } from "../../../shared/event-schema/src/index.js";
+import { buildEventFacets, parseEvent, type EventEnvelope } from "../../../shared/event-schema/src/index.js";
 import { rebuildState, reduceEvent, initialSessionState, pairToolEvents, type SessionState } from "../../../shared/state-machine/src/index.js";
 
 export type { SessionState };
@@ -133,8 +133,16 @@ function buildSyntheticEvent(
     eventType,
     timestamp: base.timestamp,
     sessionId: base.sessionId,
+    userId: base.userId,
+    machineId: base.machineId,
     source: base.source,
+    sourceVersion: base.sourceVersion,
     repoPath: base.repoPath,
+    workspaceId: base.workspaceId,
+    workspacePath: base.workspacePath,
+    privacy: base.privacy,
+    confidence: base.confidence,
+    facets: buildEventFacets(eventType, payload),
     payload,
   } as EventEnvelope;
 }

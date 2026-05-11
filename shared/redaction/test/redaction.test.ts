@@ -78,7 +78,8 @@ describe("PRIV-FR-01: Redaction in all event pathways", () => {
       payload: {}
     };
     const redacted = applyRedaction(event);
-    expect(redacted).toEqual(event);
+    expect(redacted.payload).toEqual(event.payload);
+    expect(redacted.privacy.locallyRedacted).toBe(true);
   });
 
   it("redacts GitHub personal access token in toolArgs.command", () => {
@@ -122,6 +123,37 @@ describe("PRIV-FR-01: Redaction in all event pathways", () => {
     const p = redacted.payload as Record<string, unknown>;
     expect(p.message).toBe("All steps completed.");
     expect(p.title).toBe("Build done");
+  });
+
+  it("redacts nested arrays, facets, and opt-in raw payload copies", () => {
+    const event: EventEnvelope = {
+      ...BASE,
+      eventType: "preToolUse",
+      payload: { toolName: "shell", toolArgs: { command: "token=abc123" } },
+      facets: {
+        toolCalls: [{ toolName: "shell", category: "shell_command", status: "requested", confidence: "exact" }],
+        modelUsage: [],
+        tokenUsage: [],
+        contextWindow: [],
+        agentActivity: [],
+        subagentActivity: [],
+        debugEvents: [{ kind: "debug", message: "password=secret", confidence: "exact" }],
+        filesTouched: [],
+        errors: []
+      },
+      rawPayload: {
+        redacted: true,
+        retainedFor: "debug",
+        payload: { nested: [{ message: "api_key=secret" }] }
+      }
+    } as EventEnvelope;
+
+    const redacted = applyRedaction(event);
+    const serialized = JSON.stringify(redacted);
+    expect(serialized).not.toContain("abc123");
+    expect(serialized).not.toContain("password=secret");
+    expect(serialized).not.toContain("api_key=secret");
+    expect(redacted.privacy.rawPayloadOptIn).toBe(true);
   });
 });
 

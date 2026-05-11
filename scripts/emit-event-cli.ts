@@ -14,6 +14,12 @@ interface Args {
   traceId?: string;
   spanId?: string;
   parentSpanId?: string;
+  sourceVersion?: string;
+  userId?: string;
+  machineId?: string;
+  workspaceId?: string;
+  workspacePath?: string;
+  includeRawPayload?: string;
 }
 
 function parseArgs(argv: string[]): Args {
@@ -82,6 +88,12 @@ async function main(): Promise<void> {
     source: "copilot-cli",
     httpEndpoint: args.httpEndpoint,
     storePrompts: args.storePrompts === "true",
+    includeRawPayload: args.includeRawPayload === "true",
+    sourceVersion: args.sourceVersion || undefined,
+    userId: args.userId || undefined,
+    machineId: args.machineId || undefined,
+    workspaceId: args.workspaceId || undefined,
+    workspacePath: args.workspacePath ? resolve(args.workspacePath) : undefined,
     turnId: args.turnId || undefined,
     traceId: args.traceId || undefined,
     spanId: args.spanId || undefined,
