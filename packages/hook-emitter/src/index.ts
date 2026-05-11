@@ -137,5 +137,6 @@ export async function emitRawAndValidate(
 }
 
 export function getHookEventTypes(): readonly string[] {
+  // sourceEvent is only for direct datastore imports, not hook-triggered events.
   return EVENT_TYPES.filter((eventType) => eventType !== "sourceEvent");
 }
