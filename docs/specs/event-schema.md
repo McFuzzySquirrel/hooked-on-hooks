@@ -82,12 +82,19 @@ empty facets). New emitters should always write the complete envelope.
 `source` identifies the producer family. Supported values are:
 
 - `copilot-cli`
+- `copilot-session-store`
 - `vscode`
 - `unknown`
 
 `sourceVersion` identifies the source-side payload version. Payloads remain
 source-specific and additive: unknown payload and envelope fields must be
 retained by parsers and ignored by consumers that do not understand them.
+
+The standalone source datastore path uses `source: "copilot-session-store"` and
+`eventType: "sourceEvent"` to preserve direct local source events without
+requiring hook registration. These records keep the original source event type
+in `payload.sourceEventType`, write normalized facets for filtering, and can
+optionally include redacted `rawPayload` for replay/debug.
 
 ## Privacy and Local Filtering
 
@@ -165,7 +172,7 @@ These correspond to real Copilot CLI hooks that fire during agent sessions:
 7. `agentStop`
 8. `errorOccurred`
 
-### Internal / Synthesized Event Types (3)
+### Internal / Synthesized Event Types (4)
 
 These are valid event types in the schema but are NOT triggered directly by
 Copilot CLI hooks. They are synthesized from other hooks or reserved for
@@ -176,6 +183,8 @@ future use:
 10. `subagentStart` — synthesized from `task` `postToolUse` / `postToolUseFailure`
   when `toolArgs.agent_type` (or fallback identity fields) is present
 11. `notification` — reserved for future use; no CLI hook exists
+12. `sourceEvent` — normalized direct source event imported from a local source
+   datastore adapter such as Copilot session-store; it is not a hook event
 
 See: https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-hooks
 
@@ -246,6 +255,24 @@ Current ingest synthesis heuristic:
   "message": "Explore finished"
 }
 ```
+
+### `sourceEvent`
+
+```json
+{
+  "sourceEventType": "assistant.message",
+  "sourceLine": 12,
+  "sourcePath": "/home/user/.copilot/session-state/session-id/events.jsonl",
+  "data": {
+    "model": "gpt-5.3-codex",
+    "toolRequests": []
+  }
+}
+```
+
+`sourceEvent` is the default standalone ingestion shape. It keeps source payloads
+flexible while using envelope fields and facets for filtering across machines,
+sessions, and source versions.
 
 ## Renderer State Mapping
 

@@ -137,5 +137,5 @@ export async function emitRawAndValidate(
 }
 
 export function getHookEventTypes(): readonly string[] {
-  return EVENT_TYPES;
+  return EVENT_TYPES.filter((eventType) => eventType !== "sourceEvent");
 }

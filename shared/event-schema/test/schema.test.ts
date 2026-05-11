@@ -43,6 +43,8 @@ function payloadFor(eventType: string): Record<string, unknown> {
       return { notificationType: "agent_completed", title: "Done", message: "ok" };
     case "errorOccurred":
       return { message: "error" };
+    case "sourceEvent":
+      return { sourceEventType: "assistant.message", data: { model: "gpt-5.3-codex" } };
     default:
       return {};
   }
@@ -168,6 +170,34 @@ describe("event schema", () => {
       expect(result.value.privacy.classification).toBe("confidential");
       expect(result.value.facets.toolCalls[0]?.category).toBe("subagent_task_launch");
       expect(result.value.confidence).toBe("inferred");
+    }
+  });
+
+  it("accepts direct local source events with extracted facets", () => {
+    const result = parseEvent({
+      ...baseEnvelope("sourceEvent"),
+      source: "copilot-session-store",
+      sourceVersion: "session-store-v1",
+      payload: {
+        sourceEventType: "assistant.message",
+        data: {
+          model: "gpt-5.3-codex",
+          inputTokens: 10,
+          outputTokens: 20,
+          toolRequests: [{ name: "subagent", arguments: { agentName: "qa-engineer" } }]
+        }
+      },
+      facets: {
+        modelUsage: [{ model: "gpt-5.3-codex", inputTokens: 10, outputTokens: 20, totalTokens: 30, confidence: "exact" }]
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.eventType).toBe("sourceEvent");
+      expect(result.value.source).toBe("copilot-session-store");
+      expect(result.value.payload.sourceEventType).toBe("assistant.message");
+      expect(result.value.facets.modelUsage[0]?.model).toBe("gpt-5.3-codex");
     }
   });
 });

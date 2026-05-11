@@ -179,6 +179,9 @@ export function reduceEvent(state: SessionState, event: EventEnvelope): SessionS
     case "errorOccurred":
       return { ...next, visualization: "error" };
 
+    case "sourceEvent":
+      return next;
+
     default: {
       // Exhaustiveness guard — TypeScript will error here if a new event type
       // is added to EventEnvelope without a corresponding case above.
