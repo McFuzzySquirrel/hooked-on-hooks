@@ -90,7 +90,7 @@ export function applyRedaction(event: EventEnvelope, options: RedactionOptions =
     privacy: {
       ...event.privacy,
       locallyRedacted: true,
-      rawPayloadOptIn: Boolean(rawPayload)
+      rawPayloadOptIn: event.privacy?.rawPayloadOptIn ?? Boolean(rawPayload)
     }
   } as unknown as EventEnvelope;
 }

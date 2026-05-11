@@ -98,7 +98,7 @@ export async function emitEvent(
     confidence: options.confidence ?? "exact",
     facets: buildEventFacets(eventType, payload),
     rawPayload: options.includeRawPayload
-      ? { redacted: true, payload, retainedFor: "debug" }
+      ? { redacted: false, payload, retainedFor: "debug" }
       : undefined,
     turnId: options.turnId,
     traceId: options.traceId,

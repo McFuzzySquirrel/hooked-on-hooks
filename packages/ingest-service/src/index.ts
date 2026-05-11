@@ -140,7 +140,7 @@ function buildSyntheticEvent(
     repoPath: base.repoPath,
     workspaceId: base.workspaceId,
     workspacePath: base.workspacePath,
-    privacy: base.privacy,
+    privacy: { ...base.privacy, rawPayloadOptIn: false },
     confidence: base.confidence,
     facets: buildEventFacets(eventType, payload),
     payload,
