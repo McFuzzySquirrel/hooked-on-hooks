@@ -17,6 +17,7 @@
 | 1.0 | 2026-04-12 | GitHub Copilot | Initial product vision decomposed from [docs/prd.md](prd.md) |
 | 1.1 | 2026-04-14 | GitHub Copilot | Post-MVP alignment: updated TypeScript version to match installed 5.x, all five MVP features marked complete |
 | 1.2 | 2026-04-17 | GitHub Copilot | Post-MVP direction update: tracing v2, pairing diagnostics, integration tooling, and quickstart/deep-doc split |
+| 1.3 | 2026-05-11 | GitHub Copilot | Standalone datastore direction: direct local source ingestion first, hooks/live visualization optional and deferred |
 
 ---
 
@@ -30,6 +31,7 @@
 - Preserve optional integration posture: useful standalone, with optional Agent Forge and EJS overlays.
 - Maintain schema-driven extensibility for future integrations and UI growth.
 - Provide a fast path from clone to first visible signal through quickstart docs, demo commands, and guided tutorials.
+- Build a standalone datastore from locally stored Copilot source events before adding live visualization on top.
 
 ### 3.2 Non-Goals
 - Full parity with every Copilot interaction surface outside CLI for MVP.
@@ -53,7 +55,8 @@
 ## 5. Research Findings
 
 - Architecture options assessed: plugin-only TUI, sidecar web app, and desktop app.
-- Recommended architecture for MVP: sidecar web app + hook event stream (Option B).
+- Recommended architecture for the original MVP: sidecar web app + hook event stream (Option B).
+- Current standalone direction: datastore-first direct ingestion from local Copilot source data, with live visualization deferred until after datastore filtering and aggregation are stable.
 
 | Option | Strengths | Weaknesses | Decision |
 |--------|-----------|------------|----------|
@@ -100,6 +103,7 @@ hooked-on-hooks/
 		roadmap/
 		specs/
 	packages/
+		local-datastore/
 		hook-emitter/
 		ingest-service/
 		web-ui/
@@ -114,6 +118,8 @@ hooked-on-hooks/
 | Interface | Direction | Purpose |
 |-----------|-----------|---------|
 | Copilot CLI Hook -> Emitter | Input | Capture lifecycle and tool execution events |
+| Copilot Session Store -> Local Datastore | Input | Import existing local source events without hooks |
+| Local Datastore -> Filtering / Summary | Internal | Query normalized multi-session, multi-machine event records |
 | Emitter -> JSONL Log | Output | Persist canonical event records |
 | Emitter -> Localhost HTTP (optional) | Output | Stream events to ingest service in real-time |
 | Ingest Service -> State Engine | Internal | Derive deterministic session and lane states |

@@ -4,14 +4,27 @@
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D24-3c873a?style=flat-square)](https://nodejs.org)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-A toolkit for analyzing Copilot activity with two independent workflows:
+A toolkit for analyzing Copilot activity with three independent workflows:
 
-- **Session Dashboard Pathway**: read-only analysis from local `.copilot` session-store data
-- **Hook Pipeline Pathway**: live/custom event capture via Copilot CLI hooks
+- **Standalone Datastore Pathway**: direct ingestion from local Copilot source data into an append-only event datastore
+- **Session Dashboard Pathway**: read-only static dashboard analysis from selected `.copilot` session-store exports
+- **Hook Pipeline Pathway**: optional live/custom event capture via Copilot CLI hooks
 
 ## Choose Your Path
 
-### 1) Session Dashboard (.copilot, no hooks)
+### 1) Standalone Datastore (.copilot source data, no hooks)
+
+Use this when you want to collect events directly from local source data and
+build a multi-session/multi-machine corpus before visualization.
+
+- no target-repo hook setup
+- no ingest service or browser required
+- redacted append-only datastore records
+- filtering-ready facets for future analysis
+
+Start here: [docs/pathways/standalone-datastore/README.md](docs/pathways/standalone-datastore/README.md)
+
+### 2) Session Dashboard (.copilot exports, no hooks)
 
 Use this when you want fast retrospective analysis from existing sessions.
 
@@ -21,7 +34,7 @@ Use this when you want fast retrospective analysis from existing sessions.
 
 Start here: [docs/pathways/session-dashboard/README.md](docs/pathways/session-dashboard/README.md)
 
-### 2) Hook Pipeline (live capture)
+### 3) Hook Pipeline (optional live capture)
 
 Use this when you need real-time or customized capture from a target repository.
 
@@ -46,9 +59,17 @@ npm run session:list -- --json ./session-list.json
 npm run dev --workspace=packages/web-ui
 ```
 
+For standalone datastore work:
+
+```bash
+npm run datastore:import -- --db-path ~/.copilot/session-store.db --datastore ./datastore/events.jsonl
+npm run datastore:summary -- --datastore ./datastore/events.jsonl
+```
+
 ## Project Structure
 
-- `packages/hook-emitter`: validated event emission and persistence
+- `packages/local-datastore`: standalone direct source ingestion and datastore summaries
+- `packages/hook-emitter`: optional validated hook event emission and persistence
 - `packages/ingest-service`: ingest API and live stream plumbing
 - `packages/web-ui`: selector + static dashboard UI
 - `shared/event-schema`: canonical event envelope + parser
@@ -58,5 +79,7 @@ npm run dev --workspace=packages/web-ui
 ## Additional Documentation
 
 - Tutorials index: [docs/tutorials/README.md](docs/tutorials/README.md)
+- Standalone datastore spec: [docs/specs/local-source-datastore.md](docs/specs/local-source-datastore.md)
+- Architecture decision records: [docs/adr/](docs/adr/)
 - Product vision: [docs/product-vision.md](docs/product-vision.md)
 - Progress tracker: [docs/PROGRESS.md](docs/PROGRESS.md)

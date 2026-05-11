@@ -4,8 +4,8 @@
 
 **Mode**: Feature-Based Build  
 **Product Vision**: docs/product-vision.md  
-**Status**: Complete (MVP + post-MVP enhancements) + static dashboard migration in progress  
-**Last Updated**: 2026-04-22
+**Status**: Complete (MVP + post-MVP enhancements) + static dashboard migration + standalone datastore direction  
+**Last Updated**: 2026-05-11
 
 All five planned MVP features are complete and validated locally. Post-MVP work includes integration tooling (bootstrap/unbootstrap), live board UI polish, tracing v2 (event-stream correlation), and operator UX/learning-surface updates captured in the dedicated post-MVP feature document.
 
@@ -14,6 +14,13 @@ Static session dashboard migration has started on branch `feat/staic-session-dat
 - New `session:list` and `session:export` CLI flow over `~/.copilot/session-store.db`
 - Selector + dashboard app-shell replacement in `packages/web-ui`
 - Exporter and dashboard helper tests added and passing
+
+Standalone datastore work now establishes a no-hooks source ingestion path:
+
+- `datastore:import` reads local Copilot session-store metadata and source JSONL
+- `datastore:summary` reports datastore event/session/machine/source scope
+- `sourceEvent` schema records preserve source data with filtering facets
+- Documentation suite added for ADR, feature, spec, and operator pathway
 
 ## Tracing v2: Event-Stream Correlation (Post-MVP)
 
@@ -154,6 +161,7 @@ Static session dashboard migration has started on branch `feat/staic-session-dat
 - ADR-007: `docs/adr/007-readme-quickstart-and-doc-depth-split.md`
 - ADR-008: `docs/adr/008-tracing-ux-and-doc-consolidation.md`
 - ADR-011: `docs/adr/011-multi-agent-session-improvements.md`
+- ADR-013: `docs/adr/013-standalone-local-source-datastore.md`
 
 ### Implemented Deliverables
 

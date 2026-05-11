@@ -1,6 +1,7 @@
 # Hook Pipeline Pathway (Live Capture)
 
-Use this pathway when you want real-time event capture from a target repository using Copilot CLI hooks.
+Use this pathway when you explicitly need real-time event capture from a target
+repository using Copilot CLI hooks.
 
 ## What This Pathway Is For
 
@@ -58,4 +59,7 @@ Choose Hook Pipeline when you need:
 - event fields beyond what session-store exports provide
 - per-repository hook customization and experimentation
 
-Use the Session Dashboard path if you want immediate analysis with no hook setup.
+Use the [Standalone Datastore path](../standalone-datastore/README.md) if you
+want the primary no-hooks workflow: direct ingestion from local source data into
+a durable datastore. Use the Session Dashboard path if you only need immediate
+static UI analysis of selected exports.
