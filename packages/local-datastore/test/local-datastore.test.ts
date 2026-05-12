@@ -40,7 +40,7 @@ describe("ingest-source-datastore args", () => {
     expect(importArgs.ids).toEqual(["a", "b"]);
     expect(importArgs.machineId).toBe("machine-1");
     expect(importArgs.includeSessionStore).toBe(false);
-    expect(importArgs.vscodeChatDebugPaths[0]).toContain("logs/GitHub Copilot Chat.log");
+    expect(importArgs.vscodeChatDebugPaths[0].replaceAll("\\", "/")).toContain("logs/GitHub Copilot Chat.log");
     expect(importArgs.includeRawPayload).toBe(true);
 
     const summaryArgs = parseArgs(["summary", "--datastore", "./datastore/events.jsonl"]);
