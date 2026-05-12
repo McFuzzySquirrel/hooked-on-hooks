@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "outDir": "dist"
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../shared/event-schema/src/**/*.ts",
+    "../../shared/redaction/src/**/*.ts"
+  ]
+}

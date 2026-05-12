@@ -6,6 +6,15 @@ import type { FilterConfig } from "./types.js";
  * Returns null for events that don't have an associated actor.
  */
 function extractActorName(event: EventEnvelope): string | null {
+  const toolFacet = event.facets?.toolCalls?.[0];
+  if (toolFacet?.toolName) return toolFacet.toolName;
+
+  const subagentFacet = event.facets?.subagentActivity?.[0];
+  if (subagentFacet?.agentName) return subagentFacet.agentName;
+
+  const agentFacet = event.facets?.agentActivity?.[0];
+  if (agentFacet?.agentName) return agentFacet.agentName;
+
   const p = event.payload as Record<string, unknown>;
   if (typeof p.toolName === "string")  return p.toolName;
   if (typeof p.agentName === "string") return p.agentName;

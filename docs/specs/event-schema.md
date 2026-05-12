@@ -2,7 +2,9 @@
 
 ## Scope
 
-Define the canonical event format for live visualization and replay.
+Define the canonical event format for live visualization and replay. The schema
+uses a stable envelope plus normalized filtering facets while keeping
+source-specific payloads flexible.
 
 ## Envelope
 
@@ -15,8 +17,36 @@ Each event record is a single JSON object.
   "eventType": "preToolUse",
   "timestamp": "2026-04-12T20:55:31.123Z",
   "sessionId": "string",
+  "userId": "unknown",
+  "machineId": "unknown",
   "source": "copilot-cli",
+  "sourceVersion": "unknown",
   "repoPath": "/abs/path/to/repo",
+  "workspaceId": "workspace-or-repo-id",
+  "workspacePath": "/abs/path/to/workspace",
+  "privacy": {
+    "classification": "internal",
+    "locallyRedacted": true,
+    "rawPayloadOptIn": false,
+    "retention": "standard"
+  },
+  "confidence": "exact",
+  "facets": {
+    "toolCalls": [],
+    "modelUsage": [],
+    "tokenUsage": [],
+    "contextWindow": [],
+    "agentActivity": [],
+    "subagentActivity": [],
+    "debugEvents": [],
+    "filesTouched": [],
+    "errors": []
+  },
+  "rawPayload": {
+    "redacted": true,
+    "retainedFor": "debug",
+    "payload": {}
+  },
   "turnId": "turn-optional",
   "traceId": "trace-optional",
   "spanId": "span-optional",
@@ -32,9 +62,86 @@ Each event record is a single JSON object.
 - `eventType`
 - `timestamp`
 - `sessionId`
+- `userId`
+- `machineId`
 - `source`
+- `sourceVersion`
 - `repoPath`
+- `workspaceId`
+- `privacy`
+- `confidence`
+- `facets`
 - `payload`
+
+Older `1.0.0` logs that do not contain the newer fields are normalized during
+ingestion with safe defaults (`unknown` identity, `internal` classification,
+empty facets). New emitters should always write the complete envelope.
+
+## Source Adapters
+
+`source` identifies the producer family. Supported values are:
+
+- `copilot-cli`
+- `copilot-session-store`
+- `vscode`
+- `unknown`
+
+`sourceVersion` identifies the source-side payload version. Payloads remain
+source-specific and additive: unknown payload and envelope fields must be
+retained by parsers and ignored by consumers that do not understand them.
+
+The standalone source datastore path uses `source: "copilot-session-store"` and
+`eventType: "sourceEvent"` to preserve direct local source events without
+requiring hook registration. These records keep the original source event type
+in `payload.sourceEventType`, write normalized facets for filtering, and can
+optionally include redacted `rawPayload` for replay/debug.
+
+## Privacy and Local Filtering
+
+The emitter performs local redaction before JSONL persistence or HTTP delivery.
+The `privacy` block records the classification and whether local redaction was
+applied. Raw or semi-raw payload capture is opt-in only; when enabled,
+`rawPayload.payload` must be locally redacted and retained only for replay/debug
+use.
+
+Central filtering and analytics may reclassify records later, but central
+filtering is not a substitute for local filtering because payloads can contain
+prompts, credentials, file paths, or other sensitive data.
+
+## Facets
+
+Facets are normalized indexes extracted from flexible payloads so downstream
+filtering does not need to understand every source-specific payload shape:
+
+- `toolCalls`
+- `modelUsage`
+- `tokenUsage`
+- `contextWindow`
+- `agentActivity`
+- `subagentActivity`
+- `debugEvents`
+- `filesTouched`
+- `errors`
+
+Tool calls are classified rather than modeled as one rigid event shape. Valid
+tool categories are:
+
+- `shell_command`
+- `editor_action`
+- `mcp_tool_invocation`
+- `agent_delegation`
+- `subagent_task_launch`
+- `debug_command`
+- `file_mutation`
+- `model_function_call`
+- `unknown`
+
+Every event and classified facet can carry confidence metadata:
+
+- `exact`
+- `inferred`
+- `heuristic`
+- `unknown`
 
 ## Optional Correlation Fields (Tracing v2 Phase A)
 
@@ -65,7 +172,7 @@ These correspond to real Copilot CLI hooks that fire during agent sessions:
 7. `agentStop`
 8. `errorOccurred`
 
-### Internal / Synthesized Event Types (3)
+### Internal / Synthesized Event Types (4)
 
 These are valid event types in the schema but are NOT triggered directly by
 Copilot CLI hooks. They are synthesized from other hooks or reserved for
@@ -76,6 +183,8 @@ future use:
 10. `subagentStart` — synthesized from `task` `postToolUse` / `postToolUseFailure`
   when `toolArgs.agent_type` (or fallback identity fields) is present
 11. `notification` — reserved for future use; no CLI hook exists
+12. `sourceEvent` — normalized direct source event imported from a local source
+   datastore adapter such as Copilot session-store; it is not a hook event
 
 See: https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-hooks
 
@@ -146,6 +255,24 @@ Current ingest synthesis heuristic:
   "message": "Explore finished"
 }
 ```
+
+### `sourceEvent`
+
+```json
+{
+  "sourceEventType": "assistant.message",
+  "sourceLine": 12,
+  "sourcePath": "/home/user/.copilot/session-state/session-id/events.jsonl",
+  "data": {
+    "model": "gpt-5.3-codex",
+    "toolRequests": []
+  }
+}
+```
+
+`sourceEvent` is the default standalone ingestion shape. It keeps source payloads
+flexible while using envelope fields and facets for filtering across machines,
+sessions, and source versions.
 
 ## Renderer State Mapping
 

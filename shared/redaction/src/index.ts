@@ -26,7 +26,11 @@ function redactPayloadStrings(obj: Record<string, unknown>): Record<string, unkn
       result[key] = redactSensitiveStrings(value);
     } else if (Array.isArray(value)) {
       result[key] = value.map((item) =>
-        typeof item === "string" ? redactSensitiveStrings(item) : item
+        typeof item === "string"
+          ? redactSensitiveStrings(item)
+          : item !== null && typeof item === "object"
+            ? redactPayloadStrings(item as Record<string, unknown>)
+            : item
       );
     } else if (value !== null && typeof value === "object") {
       result[key] = redactPayloadStrings(value as Record<string, unknown>);
@@ -52,17 +56,41 @@ export function applyRedaction(event: EventEnvelope, options: RedactionOptions =
 
   // Apply pattern-based redaction to every string value in the payload
   const payload = redactPayloadStrings({ ...event.payload } as Record<string, unknown>);
+  const facets = redactPayloadStrings({ ...event.facets } as Record<string, unknown>);
+  const rawPayload = event.rawPayload
+    ? {
+      ...event.rawPayload,
+      redacted: true,
+      payload: redactPayloadStrings({ ...event.rawPayload.payload } as Record<string, unknown>)
+    }
+    : undefined;
 
   // Handle prompt storage per opt-in policy
   if (event.eventType === "userPromptSubmitted") {
     if (!storePrompts) {
       // Default: remove prompt body entirely — not even a redacted placeholder
       delete payload.prompt;
+      if (rawPayload) {
+        delete rawPayload.payload.prompt;
+      }
     } else {
       // Opt-in: acknowledge that a prompt existed but suppress its content
       payload.prompt = "[REDACTED_PROMPT]";
+      if (rawPayload) {
+        rawPayload.payload.prompt = "[REDACTED_PROMPT]";
+      }
     }
   }
 
-  return { ...event, payload } as unknown as EventEnvelope;
+  return {
+    ...event,
+    payload,
+    facets,
+    rawPayload,
+    privacy: {
+      ...event.privacy,
+      locallyRedacted: true,
+      rawPayloadOptIn: event.privacy?.rawPayloadOptIn ?? Boolean(rawPayload)
+    }
+  } as unknown as EventEnvelope;
 }

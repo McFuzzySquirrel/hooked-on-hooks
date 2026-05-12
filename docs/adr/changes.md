@@ -1,5 +1,34 @@
 # ADR Change Notes
 
+## 2026-05-11 - Standalone Local Source Datastore
+
+This branch pivots the next standalone solution away from hook-first ingestion
+toward direct local source ingestion and datastore-first filtering.
+
+### Implemented
+
+1. Added ADR-013:
+- `docs/adr/013-standalone-local-source-datastore.md`
+- Establishes direct Copilot source ingestion as the primary standalone path
+- Defers live visualization until datastore and filtering semantics stabilize
+- Repositions hooks as optional/live-custom tooling rather than the default
+
+2. Added standalone documentation suite:
+- `docs/pathways/standalone-datastore/README.md`
+- `docs/features/standalone-source-datastore.md`
+- Expanded `docs/specs/local-source-datastore.md`
+
+3. Updated routing docs:
+- `README.md`
+- Session dashboard pathway
+- Hook pipeline pathway
+
+### Next
+
+1. Add datastore filtering/query commands over normalized facets.
+2. Add duplicate detection and compaction/indexing guidance.
+3. Revisit live visualization once the datastore event corpus is established.
+
 ## 2026-04-22 - Static Session Dashboard Pivot (Implementation Start)
 
 This branch starts the migration away from the live ingest visualizer model toward a static, export-driven session explorer based on `~/.copilot/session-store.db`.

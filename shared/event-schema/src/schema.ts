@@ -2,6 +2,29 @@ import { z } from "zod";
 
 export const SCHEMA_VERSION = "1.0.0";
 
+export const EVENT_SOURCES = ["copilot-cli", "copilot-session-store", "vscode", "unknown"] as const;
+
+export const PRIVACY_CLASSIFICATIONS = [
+  "public",
+  "internal",
+  "confidential",
+  "restricted"
+] as const;
+
+export const CONFIDENCE_LEVELS = ["exact", "inferred", "heuristic", "unknown"] as const;
+
+export const TOOL_CALL_CATEGORIES = [
+  "shell_command",
+  "editor_action",
+  "mcp_tool_invocation",
+  "agent_delegation",
+  "subagent_task_launch",
+  "debug_command",
+  "file_mutation",
+  "model_function_call",
+  "unknown"
+] as const;
+
 export const EVENT_TYPES = [
   "sessionStart",
   "sessionEnd",
@@ -13,10 +36,115 @@ export const EVENT_TYPES = [
   "subagentStop",
   "agentStop",
   "notification",
-  "errorOccurred"
+  "errorOccurred",
+  "sourceEvent"
 ] as const;
 
 export type EventType = (typeof EVENT_TYPES)[number];
+export type EventSource = (typeof EVENT_SOURCES)[number];
+export type PrivacyClassification = (typeof PRIVACY_CLASSIFICATIONS)[number];
+export type ConfidenceLevel = (typeof CONFIDENCE_LEVELS)[number];
+export type ToolCallCategory = (typeof TOOL_CALL_CATEGORIES)[number];
+
+const ConfidenceSchema = z.enum(CONFIDENCE_LEVELS);
+
+const PrivacySchema = z.object({
+  classification: z.enum(PRIVACY_CLASSIFICATIONS).default("internal"),
+  locallyRedacted: z.boolean().default(false),
+  rawPayloadOptIn: z.boolean().default(false),
+  retention: z.enum(["ephemeral", "session", "standard", "extended"]).default("standard")
+}).catchall(z.unknown());
+
+const ToolCallFacetSchema = z.object({
+  toolName: z.string().min(1),
+  toolCallId: z.string().min(1).optional(),
+  category: z.enum(TOOL_CALL_CATEGORIES).default("unknown"),
+  status: z.enum(["requested", "success", "failure", "denied", "unknown"]).default("unknown"),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const ModelUsageFacetSchema = z.object({
+  model: z.string().min(1).optional(),
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const TokenUsageFacetSchema = z.object({
+  inputTokens: z.number().int().nonnegative().optional(),
+  outputTokens: z.number().int().nonnegative().optional(),
+  totalTokens: z.number().int().nonnegative().optional(),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const ContextWindowFacetSchema = z.object({
+  usedTokens: z.number().int().nonnegative().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const AgentActivityFacetSchema = z.object({
+  agentName: z.string().min(1).optional(),
+  agentType: z.string().min(1).optional(),
+  action: z.enum(["started", "stopped", "delegated", "unknown"]).default("unknown"),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const DebugEventFacetSchema = z.object({
+  kind: z.string().min(1),
+  message: z.string().optional(),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const FileTouchedFacetSchema = z.object({
+  path: z.string().min(1),
+  action: z.enum(["read", "write", "delete", "rename", "unknown"]).default("unknown"),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const ErrorFacetSchema = z.object({
+  message: z.string().min(1),
+  code: z.string().optional(),
+  confidence: ConfidenceSchema.default("unknown")
+}).catchall(z.unknown());
+
+const FacetsSchema = z.object({
+  toolCalls: z.array(ToolCallFacetSchema).default([]),
+  modelUsage: z.array(ModelUsageFacetSchema).default([]),
+  tokenUsage: z.array(TokenUsageFacetSchema).default([]),
+  contextWindow: z.array(ContextWindowFacetSchema).default([]),
+  agentActivity: z.array(AgentActivityFacetSchema).default([]),
+  subagentActivity: z.array(AgentActivityFacetSchema).default([]),
+  debugEvents: z.array(DebugEventFacetSchema).default([]),
+  filesTouched: z.array(FileTouchedFacetSchema).default([]),
+  errors: z.array(ErrorFacetSchema).default([])
+}).catchall(z.unknown());
+
+const RawPayloadSchema = z.object({
+  redacted: z.boolean().default(true),
+  payload: z.record(z.string(), z.unknown()),
+  retainedFor: z.enum(["replay", "debug"]).default("debug")
+}).catchall(z.unknown());
+
+const DEFAULT_PRIVACY_METADATA = {
+  classification: "internal",
+  locallyRedacted: false,
+  rawPayloadOptIn: false,
+  retention: "standard"
+} as const;
+
+const DEFAULT_FACETS = {
+  toolCalls: [],
+  modelUsage: [],
+  tokenUsage: [],
+  contextWindow: [],
+  agentActivity: [],
+  subagentActivity: [],
+  debugEvents: [],
+  filesTouched: [],
+  errors: []
+};
 
 const BaseEnvelope = z.object({
   schemaVersion: z.string().min(1),
@@ -24,13 +152,22 @@ const BaseEnvelope = z.object({
   eventType: z.enum(EVENT_TYPES),
   timestamp: z.string().datetime({ offset: true }),
   sessionId: z.string().min(1),
-  source: z.literal("copilot-cli"),
+  userId: z.string().min(1).default("unknown"),
+  machineId: z.string().min(1).default("unknown"),
+  source: z.enum(EVENT_SOURCES).default("copilot-cli"),
+  sourceVersion: z.string().min(1).default("unknown"),
   repoPath: z.string().min(1),
+  workspaceId: z.string().min(1).default("unknown"),
+  workspacePath: z.string().min(1).optional(),
+  privacy: PrivacySchema.default(DEFAULT_PRIVACY_METADATA),
+  confidence: ConfidenceSchema.default("exact"),
+  facets: FacetsSchema.default(DEFAULT_FACETS),
+  rawPayload: RawPayloadSchema.optional(),
   turnId: z.string().min(1).optional(),
   traceId: z.string().min(1).optional(),
   spanId: z.string().min(1).optional(),
   parentSpanId: z.string().min(1).optional()
-});
+}).catchall(z.unknown());
 
 const PayloadSchemas = {
   sessionStart: z.object({}).catchall(z.unknown()),
@@ -86,6 +223,12 @@ const PayloadSchemas = {
   errorOccurred: z.object({
     message: z.string().min(1),
     code: z.string().optional()
+  }).catchall(z.unknown()),
+  sourceEvent: z.object({
+    sourceEventType: z.string().min(1),
+    data: z.record(z.string(), z.unknown()).optional(),
+    sourceLine: z.number().int().nonnegative().optional(),
+    sourcePath: z.string().min(1).optional()
   }).catchall(z.unknown())
 };
 
@@ -100,7 +243,272 @@ export const EventEnvelopeSchema = z.discriminatedUnion("eventType", [
   BaseEnvelope.extend({ eventType: z.literal("subagentStop"), payload: PayloadSchemas.subagentStop }),
   BaseEnvelope.extend({ eventType: z.literal("agentStop"), payload: PayloadSchemas.agentStop }),
   BaseEnvelope.extend({ eventType: z.literal("notification"), payload: PayloadSchemas.notification }),
-  BaseEnvelope.extend({ eventType: z.literal("errorOccurred"), payload: PayloadSchemas.errorOccurred })
+  BaseEnvelope.extend({ eventType: z.literal("errorOccurred"), payload: PayloadSchemas.errorOccurred }),
+  BaseEnvelope.extend({ eventType: z.literal("sourceEvent"), payload: PayloadSchemas.sourceEvent })
 ]);
 
 export type EventEnvelope = z.infer<typeof EventEnvelopeSchema>;
+
+export type EventFacets = z.infer<typeof FacetsSchema>;
+export type PrivacyMetadata = z.infer<typeof PrivacySchema>;
+
+const TOOL_CATEGORY_BY_NAME: Record<string, ToolCallCategory> = {
+  bash: "shell_command",
+  shell: "shell_command",
+  terminal: "shell_command",
+  run_command: "shell_command",
+  edit_file: "editor_action",
+  read_file: "editor_action",
+  write_file: "file_mutation",
+  apply_patch: "file_mutation",
+  task: "subagent_task_launch",
+  subagent: "subagent_task_launch",
+  agent: "agent_delegation",
+  debug: "debug_command",
+  mcp: "mcp_tool_invocation"
+};
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberField(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function recordField(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function addSourceModelFacets(facets: EventFacets, data: Record<string, unknown>, confidence: ConfidenceLevel): void {
+  const model = stringField(data, "model") ?? stringField(data, "newModel");
+  const usage = recordField(data, "usage");
+  const inputTokens = numberField(data, "inputTokens")
+    ?? numberField(data, "promptTokens")
+    ?? numberField(usage, "inputTokens")
+    ?? numberField(usage, "promptTokens");
+  const outputTokens = numberField(data, "outputTokens")
+    ?? numberField(data, "completionTokens")
+    ?? numberField(usage, "outputTokens")
+    ?? numberField(usage, "completionTokens");
+  const explicitTotal = numberField(data, "totalTokens")
+    ?? numberField(data, "tokens")
+    ?? numberField(usage, "totalTokens")
+    ?? numberField(usage, "tokens");
+  const totalTokens = inputTokens !== undefined || outputTokens !== undefined
+    ? (inputTokens ?? 0) + (outputTokens ?? 0)
+    : explicitTotal;
+
+  if (model || inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
+    facets.modelUsage.push({ model, inputTokens, outputTokens, totalTokens, confidence });
+    facets.tokenUsage.push({ inputTokens, outputTokens, totalTokens, confidence });
+  }
+}
+
+function addAggregateModelMetricsFacets(facets: EventFacets, data: Record<string, unknown>): void {
+  const modelMetrics = recordField(data, "modelMetrics");
+  for (const [model, rawMetric] of Object.entries(modelMetrics)) {
+    if (!rawMetric || typeof rawMetric !== "object" || Array.isArray(rawMetric)) {
+      continue;
+    }
+    const metric = rawMetric as Record<string, unknown>;
+    const usage = recordField(metric, "usage");
+    const inputTokens = numberField(usage, "inputTokens") ?? numberField(usage, "input_tokens");
+    const outputTokens = numberField(usage, "outputTokens") ?? numberField(usage, "output_tokens");
+    const totalTokens = inputTokens !== undefined || outputTokens !== undefined
+      ? (inputTokens ?? 0) + (outputTokens ?? 0)
+      : undefined;
+    facets.modelUsage.push({ model, inputTokens, outputTokens, totalTokens, confidence: "exact" });
+    facets.tokenUsage.push({ inputTokens, outputTokens, totalTokens, confidence: "exact" });
+  }
+}
+
+function addToolRequestFacets(facets: EventFacets, toolRequests: unknown): void {
+  if (!Array.isArray(toolRequests)) {
+    return;
+  }
+
+  for (const request of toolRequests) {
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      continue;
+    }
+    const req = request as Record<string, unknown>;
+    const toolName = stringField(req, "name");
+    if (!toolName) {
+      continue;
+    }
+    const args = recordField(req, "arguments");
+    const { category, confidence } = classifyTool(toolName, { toolArgs: args });
+    facets.toolCalls.push({
+      toolName,
+      toolCallId: stringField(req, "toolCallId"),
+      category,
+      status: "requested",
+      confidence
+    });
+
+    const agentName = stringField(args, "agentName")
+      ?? stringField(args, "agent_name")
+      ?? stringField(args, "name")
+      ?? (category === "subagent_task_launch" || category === "agent_delegation" ? stringField(req, "intentionSummary") : undefined);
+    if (agentName) {
+      facets.subagentActivity.push({
+        agentName,
+        action: "delegated",
+        confidence: "inferred"
+      });
+    }
+  }
+}
+
+function classifyTool(toolName: string, payload: Record<string, unknown>): { category: ToolCallCategory; confidence: ConfidenceLevel } {
+  const normalized = toolName.toLowerCase();
+  if (TOOL_CATEGORY_BY_NAME[normalized]) {
+    return { category: TOOL_CATEGORY_BY_NAME[normalized], confidence: "exact" };
+  }
+  if (normalized.includes("mcp")) {
+    return { category: "mcp_tool_invocation", confidence: "heuristic" };
+  }
+  if (normalized.includes("debug")) {
+    return { category: "debug_command", confidence: "heuristic" };
+  }
+  if (normalized.includes("file") || normalized.includes("write")) {
+    return { category: "file_mutation", confidence: "heuristic" };
+  }
+
+  const toolArgs = payload.toolArgs;
+  if (toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs) && "agent_type" in toolArgs) {
+    return { category: "subagent_task_launch", confidence: "inferred" };
+  }
+
+  return { category: "unknown", confidence: "unknown" };
+}
+
+function toolStatus(eventType: EventType, payload: Record<string, unknown>): "requested" | "success" | "failure" | "denied" | "unknown" {
+  if (eventType === "preToolUse") {
+    return "requested";
+  }
+  if (eventType === "postToolUse") {
+    return "success";
+  }
+  if (eventType === "postToolUseFailure") {
+    return payload.status === "denied" ? "denied" : "failure";
+  }
+  return "unknown";
+}
+
+export function buildEventFacets(eventType: EventType, payload: Record<string, unknown>): EventFacets {
+  const facets: EventFacets = {
+    toolCalls: [],
+    modelUsage: [],
+    tokenUsage: [],
+    contextWindow: [],
+    agentActivity: [],
+    subagentActivity: [],
+    debugEvents: [],
+    filesTouched: [],
+    errors: []
+  };
+
+  const toolName = stringField(payload, "toolName");
+  if (toolName) {
+    const { category, confidence } = classifyTool(toolName, payload);
+    facets.toolCalls.push({
+      toolName,
+      toolCallId: stringField(payload, "toolCallId"),
+      category,
+      status: toolStatus(eventType, payload),
+      confidence
+    });
+  }
+
+  const model = stringField(payload, "model");
+  const inputTokens = numberField(payload, "inputTokens");
+  const outputTokens = numberField(payload, "outputTokens");
+  const totalTokens = numberField(payload, "totalTokens");
+  if (model || inputTokens !== undefined || outputTokens !== undefined || totalTokens !== undefined) {
+    const confidence: ConfidenceLevel = model ? "exact" : "inferred";
+    facets.modelUsage.push({ model, inputTokens, outputTokens, totalTokens, confidence });
+    facets.tokenUsage.push({ inputTokens, outputTokens, totalTokens, confidence });
+  }
+
+  const usedTokens = numberField(payload, "contextUsedTokens");
+  const maxTokens = numberField(payload, "contextMaxTokens");
+  if (usedTokens !== undefined || maxTokens !== undefined) {
+    facets.contextWindow.push({ usedTokens, maxTokens, confidence: "exact" });
+  }
+
+  const agentName = stringField(payload, "agentName");
+  const agentType = stringField(payload, "agentType");
+  if (eventType === "agentStop" && (agentName || agentType)) {
+    facets.agentActivity.push({ agentName, agentType, action: "stopped", confidence: "exact" });
+  }
+  if ((eventType === "subagentStart" || eventType === "subagentStop") && (agentName || agentType)) {
+    facets.subagentActivity.push({
+      agentName,
+      agentType,
+      action: eventType === "subagentStart" ? "started" : "stopped",
+      confidence: "exact"
+    });
+  }
+
+  const message = stringField(payload, "message");
+  if (eventType === "errorOccurred" && message) {
+    facets.errors.push({ message, code: stringField(payload, "code"), confidence: "exact" });
+  }
+  const errorSummary = stringField(payload, "errorSummary");
+  if (eventType === "postToolUseFailure" && errorSummary) {
+    facets.errors.push({ message: errorSummary, confidence: "exact" });
+  }
+
+  const filePath = stringField(payload, "filePath") ?? stringField(payload, "path");
+  if (filePath) {
+    facets.filesTouched.push({ path: filePath, action: "unknown", confidence: "inferred" });
+  }
+
+  if (toolName && facets.toolCalls[0]?.category === "debug_command") {
+    facets.debugEvents.push({ kind: toolName, message: stringField(payload, "summary"), confidence: facets.toolCalls[0].confidence });
+  }
+
+  if (eventType === "sourceEvent") {
+    const sourceEventType = stringField(payload, "sourceEventType") ?? "unknown";
+    const data = recordField(payload, "data");
+    addSourceModelFacets(facets, data, "inferred");
+    addAggregateModelMetricsFacets(facets, data);
+    addToolRequestFacets(facets, data.toolRequests);
+
+    const sourceToolName = stringField(data, "toolName");
+    if (sourceToolName) {
+      const { category, confidence } = classifyTool(sourceToolName, data);
+      const success = data.success;
+      facets.toolCalls.push({
+        toolName: sourceToolName,
+        toolCallId: stringField(data, "toolCallId"),
+        category,
+        status: typeof success === "boolean" ? success ? "success" : "failure" : "unknown",
+        confidence
+      });
+    }
+
+    const filePath = stringField(data, "filePath") ?? stringField(data, "path");
+    if (filePath) {
+      facets.filesTouched.push({ path: filePath, action: "unknown", confidence: "inferred" });
+    }
+
+    const message = stringField(data, "message") ?? stringField(data, "error") ?? stringField(data, "errorSummary");
+    if (sourceEventType.includes("error") && message) {
+      facets.errors.push({ message, code: stringField(data, "code"), confidence: "inferred" });
+    }
+
+    if (sourceEventType.includes("debug")) {
+      facets.debugEvents.push({ kind: sourceEventType, message, confidence: "inferred" });
+    }
+  }
+
+  return facets;
+}

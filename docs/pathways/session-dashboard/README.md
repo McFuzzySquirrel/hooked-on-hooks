@@ -1,6 +1,7 @@
 # Session Dashboard Pathway (.copilot Session Store)
 
-Use this pathway when you want fast, read-only analysis of existing Copilot sessions with no hook setup.
+Use this pathway when you want fast, read-only dashboard analysis of selected
+existing Copilot sessions with no hook setup.
 
 ## Why This Pathway Exists
 
@@ -82,3 +83,7 @@ Choose Session Dashboard when you need:
 - low-friction setup on a new machine
 
 Use the hook pipeline path if you need live, custom event capture from a target repository.
+
+Use the [Standalone Datastore pathway](../standalone-datastore/README.md) if you
+want to ingest source events into a durable multi-session or multi-machine event
+corpus before visualization.
