@@ -12,13 +12,15 @@ A toolkit for analyzing Copilot activity with three independent workflows:
 
 ## Choose Your Path
 
-### 1) Standalone Datastore (.copilot source data, no hooks)
+### 1) Standalone Datastore (.copilot source data + VS Code Copilot Chat, no hooks)
 
 Use this when you want to collect events directly from local source data and
-build a multi-session/multi-machine corpus before visualization.
+build a multi-session/multi-machine corpus before visualization. Covers both
+Copilot CLI sessions and VS Code GitHub Copilot Chat IDE sessions.
 
 - no target-repo hook setup
 - no ingest service or browser required
+- imports Copilot CLI sessions and VS Code Copilot Chat debug logs
 - redacted append-only datastore records
 - filtering-ready facets for future analysis
 
@@ -62,7 +64,15 @@ npm run dev --workspace=packages/web-ui
 For standalone datastore work:
 
 ```bash
+# Import from Copilot CLI session store
 npm run datastore:import -- --db-path ~/.copilot/session-store.db --datastore ./datastore/events.jsonl
+
+# Also include VS Code GitHub Copilot Chat debug logs
+npm run datastore:import -- --db-path ~/.copilot/session-store.db --datastore ./datastore/events.jsonl --include-vscode-chat-debug
+
+# IDE-only import (no Copilot CLI session store required)
+npm run datastore:import -- --no-session-store --vscode-chat-debug-path ~/.config/Code/logs --datastore ./datastore/events.jsonl
+
 npm run datastore:summary -- --datastore ./datastore/events.jsonl
 ```
 

@@ -1,5 +1,49 @@
 # ADR Change Notes
 
+## 2026-05-12 - VS Code GitHub Copilot Chat Debug Log Import
+
+Extends the standalone datastore pathway to also ingest VS Code GitHub Copilot
+Chat debug log files. This covers users working from the IDE rather than the
+Copilot CLI, so both sources end up in the same append-only datastore.
+
+### Implemented
+
+1. VS Code source adapter in `packages/local-datastore/src/index.ts`:
+   - Auto-discovers Copilot Chat logs from default VS Code/Code-Insiders log
+     directories on Linux, macOS, and Windows.
+   - Accepts an explicit `--vscode-chat-debug-path <file-or-dir>` argument.
+   - Normalizes each log line into a `sourceEvent` envelope with
+     `source: "vscode"` and `sourceVersion: "copilot-chat-debug-log-v1"`.
+   - Parses log-line timestamps and level prefixes; maps debug-level lines to
+     the `debugEvents` facet.
+   - Applies standard redaction and opt-in raw payload retention.
+   - Generates a stable `sessionId` from the machine ID and log path so
+     repeated imports are idempotent.
+
+2. New CLI flags in `scripts/ingest-source-datastore.ts`:
+   - `--include-vscode-chat-debug` — discover and import from default VS Code
+     log locations.
+   - `--vscode-chat-debug-path <path>` — import a specific file or directory
+     (repeatable).
+   - `--no-session-store` — skip `session-store.db` for IDE-only imports.
+
+3. Updated documentation suite:
+   - `docs/pathways/standalone-datastore/README.md` — IDE-only quickstart steps
+   - `docs/specs/local-source-datastore.md` — VS Code source table row,
+     `sourceVersion`, CLI flag table, facet description
+   - `docs/features/standalone-source-datastore.md` — SDS-FR-02 updated,
+     Phase 1 checklist item added
+   - `docs/adr/013-standalone-local-source-datastore.md` — VS Code source
+     listed in context; VS Code adapter paragraph added to Decision section
+   - `README.md` — standalone section description and quickstart updated
+   - `docs/PROGRESS.md` — VS Code chat bullets and test summary updated
+
+### Next
+
+1. Add datastore filtering/query commands over normalized facets.
+2. Add duplicate detection and compaction/indexing guidance.
+3. Revisit live visualization once the datastore event corpus is established.
+
 ## 2026-05-11 - Standalone Local Source Datastore
 
 This branch pivots the next standalone solution away from hook-first ingestion

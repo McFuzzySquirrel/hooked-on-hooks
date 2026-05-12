@@ -16,6 +16,9 @@ interface Args {
   userId?: string;
   includeRawPayload: boolean;
   redact: boolean;
+  includeSessionStore: boolean;
+  includeDefaultVscodeChatDebug: boolean;
+  vscodeChatDebugPaths: string[];
 }
 
 function usage(): string {
@@ -30,6 +33,11 @@ function usage(): string {
     "  --machine-id <id>     Machine identifier for multi-machine datastore records",
     "  --user-id <id>        User identifier for datastore records",
     "  --include-raw-payload Store opt-in redacted raw source payload copies",
+    "  --include-vscode-chat-debug",
+    "                        Import VS Code GitHub Copilot Chat debug logs from default locations",
+    "  --vscode-chat-debug-path <path>",
+    "                        Import a VS Code GitHub Copilot Chat debug log file or directory",
+    "  --no-session-store    Skip ~/.copilot/session-store.db for IDE-only imports",
     "  --no-redact           Disable local redaction (not recommended)",
   ].join("\n");
 }
@@ -49,7 +57,10 @@ export function parseArgs(argv: string[]): Args {
     datastorePath: resolve(process.cwd(), "datastore", "events.jsonl"),
     ids: [],
     includeRawPayload: false,
-    redact: true
+    redact: true,
+    includeSessionStore: true,
+    includeDefaultVscodeChatDebug: false,
+    vscodeChatDebugPaths: []
   };
 
   for (let i = 0; i < tokens.length; i += 1) {
@@ -60,6 +71,14 @@ export function parseArgs(argv: string[]): Args {
     }
     if (token === "--no-redact") {
       args.redact = false;
+      continue;
+    }
+    if (token === "--include-vscode-chat-debug") {
+      args.includeDefaultVscodeChatDebug = true;
+      continue;
+    }
+    if (token === "--no-session-store") {
+      args.includeSessionStore = false;
       continue;
     }
     if (!token.startsWith("--")) {
@@ -86,6 +105,9 @@ export function parseArgs(argv: string[]): Args {
         break;
       case "--user-id":
         args.userId = value;
+        break;
+      case "--vscode-chat-debug-path":
+        args.vscodeChatDebugPaths.push(resolve(value));
         break;
       default:
         fail(`unknown option ${token}`);
@@ -117,7 +139,10 @@ export async function main(): Promise<void> {
     machineId: args.machineId,
     userId: args.userId,
     includeRawPayload: args.includeRawPayload,
-    redact: args.redact
+    redact: args.redact,
+    includeSessionStore: args.includeSessionStore,
+    includeDefaultVscodeChatDebug: args.includeDefaultVscodeChatDebug,
+    vscodeChatDebugPaths: args.vscodeChatDebugPaths
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
