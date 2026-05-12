@@ -1,9 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { hostname, userInfo } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { hostname, homedir, platform, userInfo } from "node:os";
 import {
   SCHEMA_VERSION,
   buildEventFacets,
@@ -20,6 +20,9 @@ export interface CopilotSessionStoreImportOptions {
   userId?: string;
   includeRawPayload?: boolean;
   redact?: boolean;
+  includeSessionStore?: boolean;
+  includeDefaultVscodeChatDebug?: boolean;
+  vscodeChatDebugPaths?: string[];
   now?: () => string;
 }
 
@@ -66,6 +69,17 @@ interface SourceLineContext {
   now: () => string;
 }
 
+interface VscodeChatDebugLineContext {
+  logPath: string;
+  lineNumber: number;
+  line: string;
+  machineId: string;
+  userId: string;
+  includeRawPayload: boolean;
+  redact: boolean;
+  now: () => string;
+}
+
 function sqlEscape(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -97,6 +111,28 @@ function sourceEventsPath(dbPath: string, sessionId: string): string {
   return resolve(dirname(dbPath), "session-state", sessionId, "events.jsonl");
 }
 
+function defaultVscodeChatDebugRoots(): string[] {
+  const home = homedir();
+  const candidates = platform() === "win32"
+    ? [
+      process.env.APPDATA ? join(process.env.APPDATA, "Code", "logs") : undefined,
+      process.env.APPDATA ? join(process.env.APPDATA, "Code - Insiders", "logs") : undefined
+    ]
+    : platform() === "darwin"
+      ? [
+        join(home, "Library", "Application Support", "Code", "logs"),
+        join(home, "Library", "Application Support", "Code - Insiders", "logs")
+      ]
+      : [
+        join(home, ".config", "Code", "logs"),
+        join(home, ".config", "Code - Insiders", "logs"),
+        join(home, ".vscode-server", "data", "logs"),
+        join(home, ".vscode-server-insiders", "data", "logs")
+      ];
+
+  return candidates.filter((candidate): candidate is string => Boolean(candidate));
+}
+
 function defaultMachineId(): string {
   return hostname() || "unknown";
 }
@@ -116,6 +152,78 @@ function stableUuid(input: string): string {
   hex[16] = ((variant & 0x3) | 0x8).toString(16);
   const value = hex.join("");
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
+}
+
+function vscodeSessionId(logPath: string, machineId: string): string {
+  return `vscode-copilot-chat-${stableUuid(`${machineId}:${logPath}`).slice(0, 8)}`;
+}
+
+function isVscodeCopilotChatLogPath(logPath: string): boolean {
+  const lower = basename(logPath).toLowerCase();
+  return lower.endsWith(".log")
+    && (lower.includes("github copilot chat") || lower.includes("copilot chat") || lower.includes("github.copilot-chat"));
+}
+
+async function discoverVscodeChatDebugFiles(paths: string[], depth = 0): Promise<string[]> {
+  const files: string[] = [];
+  if (depth > 6) {
+    return files;
+  }
+
+  for (const candidate of paths) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    const info = await stat(candidate);
+    if (info.isFile()) {
+      files.push(candidate);
+      continue;
+    }
+    if (!info.isDirectory()) {
+      continue;
+    }
+
+    const childPaths = (await readdir(candidate, { withFileTypes: true }))
+      .map((entry) => join(candidate, entry.name));
+    for (const childPath of childPaths) {
+      const childInfo = await stat(childPath);
+      if (childInfo.isFile() && isVscodeCopilotChatLogPath(childPath)) {
+        files.push(childPath);
+      } else if (childInfo.isDirectory()) {
+        files.push(...await discoverVscodeChatDebugFiles([childPath], depth + 1));
+      }
+    }
+  }
+
+  return [...new Set(files)].sort();
+}
+
+function parseVscodeChatDebugLine(line: string): { timestamp?: string; level?: string; message: string } {
+  let remainder = line.trim();
+  let timestamp: string | undefined;
+  const timestampMatch = remainder.match(/^\[?(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z?)\]?\s*/);
+  if (timestampMatch?.[1]) {
+    const normalized = timestampMatch[1].includes("T")
+      ? timestampMatch[1]
+      : timestampMatch[1].replace(" ", "T");
+    const withZone = /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
+    const parsed = new Date(withZone);
+    if (!Number.isNaN(parsed.getTime())) {
+      timestamp = parsed.toISOString();
+    }
+    remainder = remainder.slice(timestampMatch[0].length).trim();
+  }
+
+  const levelMatch = remainder.match(/\[(trace|debug|info|warn|warning|error)\]/i)
+    ?? remainder.match(/^(trace|debug|info|warn|warning|error)\b/i);
+  const level = levelMatch?.[1]?.toLowerCase().replace("warning", "warn");
+
+  return {
+    timestamp,
+    level,
+    message: remainder
+  };
 }
 
 function eventTimestamp(source: Record<string, unknown>, session: SessionRow, now: () => string): string {
@@ -189,6 +297,66 @@ function normalizeSourceLine(context: SourceLineContext): EventEnvelope | null {
     : validation.value;
 }
 
+function normalizeVscodeChatDebugLine(context: VscodeChatDebugLineContext): EventEnvelope | null {
+  const parsed = parseVscodeChatDebugLine(context.line);
+  const level = parsed.level ?? "debug";
+  const sourceEventType = `vscode.copilot-chat.${level}`;
+  const payload = {
+    sourceEventType,
+    data: {
+      level,
+      message: parsed.message
+    },
+    sourceLine: context.lineNumber,
+    sourcePath: context.logPath
+  };
+  const timestamp = parsed.timestamp ?? context.now();
+  const sessionId = vscodeSessionId(context.logPath, context.machineId);
+  const event = {
+    schemaVersion: SCHEMA_VERSION,
+    eventId: stableUuid(`${context.machineId}:${context.logPath}:${context.lineNumber}:${context.line}`),
+    eventType: "sourceEvent",
+    timestamp,
+    sessionId,
+    userId: context.userId,
+    machineId: context.machineId,
+    source: "vscode",
+    sourceVersion: "copilot-chat-debug-log-v1",
+    repoPath: "vscode-copilot-chat",
+    workspaceId: "vscode-copilot-chat",
+    privacy: {
+      classification: "internal",
+      locallyRedacted: false,
+      rawPayloadOptIn: context.includeRawPayload,
+      retention: "standard"
+    },
+    confidence: "inferred",
+    facets: buildEventFacets("sourceEvent", payload),
+    rawPayload: context.includeRawPayload
+      ? {
+        redacted: false,
+        retainedFor: "debug",
+        payload: {
+          sourceEventType,
+          sourceLine: context.lineNumber,
+          sourcePath: context.logPath,
+          rawLine: context.line
+        }
+      }
+      : undefined,
+    payload
+  };
+
+  const validation = parseEvent(event);
+  if (!validation.ok) {
+    return null;
+  }
+
+  return context.redact
+    ? applyRedaction(validation.value)
+    : validation.value;
+}
+
 export function getCopilotSessionRows(dbPath: string, sessionIds?: string[]): SessionRow[] {
   const where = sessionIds && sessionIds.length > 0
     ? `WHERE id IN (${sessionIds.map(sqlEscape).join(", ")})`
@@ -207,9 +375,11 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
   const userId = options.userId ?? defaultUserId();
   const now = options.now ?? (() => new Date().toISOString());
   const redact = options.redact ?? true;
-  const sessions = getCopilotSessionRows(options.dbPath, options.sessionIds);
+  const includeSessionStore = options.includeSessionStore ?? true;
+  const sessions = includeSessionStore ? getCopilotSessionRows(options.dbPath, options.sessionIds) : [];
   let importedEvents = 0;
   let skippedLines = 0;
+  const importedSessions = new Set<string>(sessions.map((session) => session.id));
 
   await mkdir(dirname(options.datastorePath), { recursive: true });
 
@@ -245,11 +415,43 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
     }
   }
 
+  const explicitVscodePaths = options.vscodeChatDebugPaths ?? [];
+  const vscodePaths = [
+    ...explicitVscodePaths,
+    ...(options.includeDefaultVscodeChatDebug ? defaultVscodeChatDebugRoots() : [])
+  ];
+  const vscodeFiles = await discoverVscodeChatDebugFiles(vscodePaths);
+  for (const logPath of vscodeFiles) {
+    const sessionId = vscodeSessionId(logPath, machineId);
+    importedSessions.add(sessionId);
+    const lines = (await readFile(logPath, "utf8"))
+      .split(/\r?\n/)
+      .filter((line) => line.trim().length > 0);
+    for (let index = 0; index < lines.length; index += 1) {
+      const event = normalizeVscodeChatDebugLine({
+        logPath,
+        lineNumber: index + 1,
+        line: lines[index],
+        machineId,
+        userId,
+        includeRawPayload: options.includeRawPayload ?? false,
+        redact,
+        now
+      });
+      if (!event) {
+        skippedLines += 1;
+        continue;
+      }
+      await appendFile(options.datastorePath, `${JSON.stringify(event)}\n`, "utf8");
+      importedEvents += 1;
+    }
+  }
+
   return {
     datastorePath: options.datastorePath,
     importedEvents,
     skippedLines,
-    sessions: sessions.map((session) => session.id)
+    sessions: [...importedSessions].sort()
   };
 }
 
