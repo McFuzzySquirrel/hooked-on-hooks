@@ -1,5 +1,11 @@
 # Standalone Datastore Pathway
 
+> **This pathway has been extracted into its own standalone repository:**
+> [`copilot-trace-importer`](https://github.com/McFuzzySquirrel/copilot-trace-importer)
+>
+> For fresh usage, use the standalone repo directly. The documentation below
+> remains as an in-project reference.
+
 Use this pathway when you want to ingest Copilot activity directly from local
 source data and build a durable event corpus before thinking about live
 visualization.
