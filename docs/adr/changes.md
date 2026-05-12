@@ -11,6 +11,10 @@ Copilot CLI, so both sources end up in the same append-only datastore.
 1. VS Code source adapter in `packages/local-datastore/src/index.ts`:
    - Auto-discovers Copilot Chat logs from default VS Code/Code-Insiders log
      directories on Linux, macOS, and Windows.
+   - Auto-discovers Copilot Chat logs from default VS Code/Code-Insiders
+     `User/workspaceStorage` roots on Linux, macOS, and Windows.
+   - Supports both `.log` and `.jsonl` debug sources so IDE workspaceStorage
+     `main.jsonl` traces are imported.
    - Accepts an explicit `--vscode-chat-debug-path <file-or-dir>` argument.
    - Normalizes each log line into a `sourceEvent` envelope with
      `source: "vscode"` and `sourceVersion: "copilot-chat-debug-log-v1"`.

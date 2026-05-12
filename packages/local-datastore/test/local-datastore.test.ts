@@ -46,6 +46,11 @@ describe("ingest-source-datastore args", () => {
     const summaryArgs = parseArgs(["summary", "--datastore", "./datastore/events.jsonl"]);
     expect(summaryArgs.command).toBe("summary");
     expect(summaryArgs.datastorePath.replaceAll("\\", "/")).toContain("datastore/events.jsonl");
+    expect(summaryArgs.verboseSummary).toBe(false);
+
+    const verboseSummaryArgs = parseArgs(["summary", "--datastore", "./datastore/events.jsonl", "--verbose"]);
+    expect(verboseSummaryArgs.command).toBe("summary");
+    expect(verboseSummaryArgs.verboseSummary).toBe(true);
   });
 });
 
@@ -197,6 +202,9 @@ describe("VS Code Copilot Chat debug import", () => {
 
     expect(result.importedEvents).toBe(2);
     expect(result.sessions[0]).toMatch(/^vscode-copilot-chat-/);
+    expect(result.vscodeDebugImport?.enabled).toBe(true);
+    expect(result.vscodeDebugImport?.discoveredFiles).toBe(1);
+    expect(result.vscodeDebugImport?.roots.some((root) => root.discoveredFiles === 1 && root.importedEvents === 2)).toBe(true);
 
     const lines = (await readFile(datastorePath, "utf8")).trim().split("\n");
     expect(lines).toHaveLength(2);
@@ -253,6 +261,7 @@ describe("VS Code Copilot Chat debug import", () => {
     });
 
     expect(result.importedEvents).toBe(1);
+    expect(result.vscodeDebugImport?.discoveredFiles).toBe(1);
     const lines = (await readFile(datastorePath, "utf8")).trim().split("\n");
     expect(lines).toHaveLength(1);
     const first = JSON.parse(lines[0]) as {
@@ -262,5 +271,145 @@ describe("VS Code Copilot Chat debug import", () => {
     expect(first.source).toBe("vscode");
     expect(first.payload.sourcePath.replaceAll("\\", "/")).toContain("/github.copilot-chat/renderer.log");
     expect(first.payload.sourceEventType).toBe("vscode.copilot-chat.debug");
+  });
+
+  it("discovers Copilot Chat debug logs under workspaceStorage when path is provided", async () => {
+    const workspaceStorageRoot = join(tempRoot, "Code", "User", "workspaceStorage");
+    const logDir = join(
+      workspaceStorageRoot,
+      "workspace-abc123",
+      "GitHub.copilot-chat",
+      "debug-logs"
+    );
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, "main.jsonl");
+    writeFileSync(
+      logPath,
+      "[2026-05-12 05:40:00.000] [debug] workspaceStorage debug line",
+      "utf8"
+    );
+
+    const result = await importCopilotSessionStore({
+      dbPath: join(tempRoot, "missing-session-store.db"),
+      datastorePath,
+      includeSessionStore: false,
+      vscodeChatDebugPaths: [workspaceStorageRoot],
+      machineId: "machine-1",
+      userId: "user-1",
+      now: () => "2026-05-12T05:42:00.000Z"
+    });
+
+    expect(result.importedEvents).toBe(1);
+    expect(result.vscodeDebugImport?.discoveredFiles).toBe(1);
+    const lines = (await readFile(datastorePath, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const first = JSON.parse(lines[0]) as {
+      source: string;
+      sourceVersion: string;
+      payload: { sourcePath: string; sourceEventType: string };
+    };
+    expect(first.source).toBe("vscode");
+    expect(first.sourceVersion).toBe("copilot-chat-debug-log-v1");
+    expect(first.payload.sourcePath.replaceAll("\\", "/").toLowerCase()).toContain("/github.copilot-chat/debug-logs/main.jsonl");
+    expect(first.payload.sourceEventType).toBe("vscode.copilot-chat.debug");
+  });
+
+  it("auto-discovers workspaceStorage logs from default roots with includeDefaultVscodeChatDebug", async () => {
+    const originalHome = process.env.HOME;
+    process.env.HOME = tempRoot;
+    try {
+      const logDir = join(
+        tempRoot,
+        ".config",
+        "Code",
+        "User",
+        "workspaceStorage",
+        "workspace-xyz789",
+        "GitHub.copilot-chat",
+        "debug-logs"
+      );
+      mkdirSync(logDir, { recursive: true });
+      const logPath = join(logDir, "main.jsonl");
+      writeFileSync(
+        logPath,
+        "[2026-05-12 05:40:00.000] [debug] auto-discovery workspaceStorage line",
+        "utf8"
+      );
+
+      const firstRun = await importCopilotSessionStore({
+        dbPath: join(tempRoot, "missing-session-store.db"),
+        datastorePath,
+        includeSessionStore: false,
+        includeDefaultVscodeChatDebug: true,
+        machineId: "machine-1",
+        userId: "user-1",
+        now: () => "2026-05-12T05:42:00.000Z"
+      });
+
+      const secondDatastorePath = join(tempRoot, "datastore", "events-second-run.jsonl");
+      const secondRun = await importCopilotSessionStore({
+        dbPath: join(tempRoot, "missing-session-store.db"),
+        datastorePath: secondDatastorePath,
+        includeSessionStore: false,
+        includeDefaultVscodeChatDebug: true,
+        machineId: "machine-1",
+        userId: "user-1",
+        now: () => "2026-05-12T05:42:00.000Z"
+      });
+
+      expect(firstRun.importedEvents).toBe(1);
+      expect(secondRun.importedEvents).toBe(1);
+      expect(firstRun.vscodeDebugImport?.discoveredFiles).toBe(1);
+      expect(secondRun.vscodeDebugImport?.discoveredFiles).toBe(1);
+      expect(firstRun.sessions).toHaveLength(1);
+      expect(secondRun.sessions).toHaveLength(1);
+      expect(firstRun.sessions[0]).toBe(secondRun.sessions[0]);
+    } finally {
+      process.env.HOME = originalHome;
+    }
+  });
+
+  it("reports verbose VS Code source-path breakdown in datastore summary", async () => {
+    const logsRoot = join(tempRoot, "Code", "logs");
+    const logsDir = join(logsRoot, "20260512T000000", "window1", "exthost");
+    mkdirSync(logsDir, { recursive: true });
+    writeFileSync(
+      join(logsDir, "GitHub Copilot Chat.log"),
+      "[2026-05-12 05:40:00.000] [debug] logs root line",
+      "utf8"
+    );
+
+    const workspaceStorageRoot = join(tempRoot, "Code", "User", "workspaceStorage");
+    const workspaceStorageDir = join(
+      workspaceStorageRoot,
+      "workspace-abc123",
+      "GitHub.copilot-chat",
+      "debug-logs"
+    );
+    mkdirSync(workspaceStorageDir, { recursive: true });
+    writeFileSync(
+      join(workspaceStorageDir, "main.jsonl"),
+      "[2026-05-12 05:40:01.000] [debug] workspaceStorage line",
+      "utf8"
+    );
+
+    await importCopilotSessionStore({
+      dbPath: join(tempRoot, "missing-session-store.db"),
+      datastorePath,
+      includeSessionStore: false,
+      vscodeChatDebugPaths: [logsRoot, workspaceStorageRoot],
+      machineId: "machine-1",
+      userId: "user-1",
+      now: () => "2026-05-12T05:42:00.000Z"
+    });
+
+    const summary = await summarizeDatastore(datastorePath, { verbose: true, topSourcePathsLimit: 10 });
+    expect(summary.sourceEventCounts.vscode).toBe(2);
+    expect(summary.vscodePathBreakdown?.totalVscodeEvents).toBe(2);
+    expect(summary.vscodePathBreakdown?.buckets.logs).toBe(1);
+    expect(summary.vscodePathBreakdown?.buckets.workspaceStorage).toBe(1);
+    expect(summary.vscodePathBreakdown?.buckets.other).toBe(0);
+    expect(summary.vscodePathBreakdown?.buckets.missingSourcePath).toBe(0);
+    expect(summary.vscodePathBreakdown?.topSourcePaths).toHaveLength(2);
   });
 });

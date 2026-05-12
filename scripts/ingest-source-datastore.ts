@@ -19,6 +19,7 @@ interface Args {
   includeSessionStore: boolean;
   includeDefaultVscodeChatDebug: boolean;
   vscodeChatDebugPaths: string[];
+  verboseSummary: boolean;
 }
 
 function usage(): string {
@@ -34,9 +35,10 @@ function usage(): string {
     "  --user-id <id>        User identifier for datastore records",
     "  --include-raw-payload Store opt-in redacted raw source payload copies",
     "  --include-vscode-chat-debug",
-    "                        Import VS Code GitHub Copilot Chat debug logs from default locations",
+    "                        Import VS Code GitHub Copilot Chat debug logs from default logs/workspaceStorage locations",
     "  --vscode-chat-debug-path <path>",
     "                        Import a VS Code GitHub Copilot Chat debug log file or directory",
+    "  --verbose             Summary: include VS Code path-pattern breakdown and top source paths",
     "  --no-session-store    Skip ~/.copilot/session-store.db for IDE-only imports",
     "  --no-redact           Disable local redaction (not recommended)",
   ].join("\n");
@@ -60,7 +62,8 @@ export function parseArgs(argv: string[]): Args {
     redact: true,
     includeSessionStore: true,
     includeDefaultVscodeChatDebug: false,
-    vscodeChatDebugPaths: []
+    vscodeChatDebugPaths: [],
+    verboseSummary: false
   };
 
   for (let i = 0; i < tokens.length; i += 1) {
@@ -79,6 +82,10 @@ export function parseArgs(argv: string[]): Args {
     }
     if (token === "--no-session-store") {
       args.includeSessionStore = false;
+      continue;
+    }
+    if (token === "--verbose") {
+      args.verboseSummary = true;
       continue;
     }
     if (!token.startsWith("--")) {
@@ -127,7 +134,9 @@ export async function main(): Promise<void> {
 
   const args = parseArgs(argv);
   if (args.command === "summary") {
-    const summary = await summarizeDatastore(args.datastorePath);
+    const summary = await summarizeDatastore(args.datastorePath, {
+      verbose: args.verboseSummary
+    });
     process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
     return;
   }
