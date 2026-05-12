@@ -5,8 +5,9 @@
 The standalone datastore imports events directly from local source data instead
 of relying on hook scripts or live visualization. The first adapter reads
 Copilot `session-store.db` metadata plus per-session `session-state/*/events.jsonl`
-source logs and writes normalized hybrid events to an append-only JSONL
-datastore.
+source logs, and the VS Code adapter reads GitHub Copilot Chat debug logs for
+IDE chat sessions. Both adapters write normalized hybrid events to an append-only
+JSONL datastore.
 
 This spec is the data-contract reference for the standalone solution. It is
 deliberately independent from live visualization, hook bootstrap, and web UI
@@ -67,6 +68,7 @@ The first adapter reads:
 |--------|---------|
 | `session-store.db` | Session ID, repository/workspace context, timestamps |
 | `session-state/<session-id>/events.jsonl` | Source event chronology and source payloads |
+| VS Code `logs/**/GitHub Copilot Chat.log` | GitHub Copilot Chat debug events from IDE sessions |
 
 The importer resolves the source JSONL path relative to the database directory:
 
@@ -79,6 +81,12 @@ dirname(<db-path>)/session-state/<session-id>/events.jsonl
 ```bash
 npm run datastore:import -- \
   --db-path ~/.copilot/session-store.db \
+  --datastore ./datastore/events.jsonl \
+  --include-vscode-chat-debug
+
+npm run datastore:import -- \
+  --no-session-store \
+  --vscode-chat-debug-path ~/.config/Code/logs \
   --datastore ./datastore/events.jsonl
 
 npm run datastore:summary -- \
@@ -99,6 +107,9 @@ can be grouped later.
 | `--machine-id <id>` | local hostname | Stable machine label for aggregation |
 | `--user-id <id>` | local username or `unknown` | Optional local user label |
 | `--include-raw-payload` | false | Store redacted raw source payload copy |
+| `--include-vscode-chat-debug` | false | Discover and import VS Code GitHub Copilot Chat logs from default locations |
+| `--vscode-chat-debug-path <path>` | none | Import an explicit VS Code Copilot Chat log file or directory |
+| `--no-session-store` | false | Skip `session-store.db` for IDE-only imports |
 | `--no-redact` | false | Disable default redaction for private local debugging |
 
 ### Summary Output
@@ -144,6 +155,11 @@ Each direct source record is stored as `eventType: "sourceEvent"` with:
 
 This lets the datastore accumulate events across machines and sessions before
 any live visualization layer is built on top.
+
+VS Code GitHub Copilot Chat debug records use `source: "vscode"` and
+`sourceVersion: "copilot-chat-debug-log-v1"`. Their `payload.sourceEventType`
+is normalized to `vscode.copilot-chat.<level>`, and debug-level lines populate
+the `debugEvents` facet for filtering.
 
 ### Example Record
 
@@ -200,7 +216,7 @@ The importer extracts normalized facets when source fields are available:
 | `subagentActivity` | `toolRequests[].arguments.agentName`, `agent_name`, `name`, or delegation summaries |
 | `filesTouched` | `data.filePath` or `data.path` |
 | `errors` | source event types containing `error` plus message/code fields |
-| `debugEvents` | source event types containing `debug` |
+| `debugEvents` | source event types containing `debug`, including VS Code GitHub Copilot Chat debug lines |
 
 Filtering consumers should prefer facets and envelope metadata over
 source-specific `payload.data` parsing.

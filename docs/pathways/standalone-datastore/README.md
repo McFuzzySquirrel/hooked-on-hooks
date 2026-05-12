@@ -11,6 +11,7 @@ happened:
 
 - `~/.copilot/session-store.db` for session metadata
 - `~/.copilot/session-state/<session-id>/events.jsonl` for source events
+- VS Code GitHub Copilot Chat debug logs for IDE chat sessions
 
 The standalone datastore pathway imports that data directly. It does not require:
 
@@ -45,14 +46,33 @@ npm run datastore:import -- \
   --machine-id "$(hostname)"
 ```
 
-3. Inspect the datastore summary:
+3. Optionally include VS Code GitHub Copilot Chat debug events:
+
+```bash
+npm run datastore:import -- \
+  --db-path ~/.copilot/session-store.db \
+  --datastore ./datastore/events.jsonl \
+  --include-vscode-chat-debug
+```
+
+For IDE-only imports that do not use the Copilot CLI session store, provide a
+VS Code Copilot Chat log file or directory and skip the session store:
+
+```bash
+npm run datastore:import -- \
+  --no-session-store \
+  --vscode-chat-debug-path ~/.config/Code/logs \
+  --datastore ./datastore/events.jsonl
+```
+
+4. Inspect the datastore summary:
 
 ```bash
 npm run datastore:summary -- \
   --datastore ./datastore/events.jsonl
 ```
 
-4. Import selected sessions only:
+5. Import selected sessions only:
 
 ```bash
 npm run datastore:import -- \
@@ -82,9 +102,9 @@ the sensitivity of the source data.
 Each line is one schema-compliant event envelope:
 
 - `eventType`: `sourceEvent`
-- `source`: `copilot-session-store`
+- `source`: `copilot-session-store` or `vscode`
 - `sourceVersion`: adapter/source format label
-- `sessionId`: Copilot session ID
+- `sessionId`: Copilot session ID or stable VS Code Copilot Chat log identifier
 - `machineId`: importer-provided or local hostname
 - `payload.sourceEventType`: original source event type
 - `payload.data`: flexible source event payload

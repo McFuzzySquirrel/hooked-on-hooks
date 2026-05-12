@@ -50,7 +50,7 @@ or live visualization.
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | SDS-FR-01 | The importer must read session metadata from a local Copilot `session-store.db`. | Must |
-| SDS-FR-02 | The importer must read source event records from `session-state/<session-id>/events.jsonl`. | Must |
+| SDS-FR-02 | The importer must read source event records from `session-state/<session-id>/events.jsonl` and VS Code GitHub Copilot Chat debug logs when configured. | Must |
 | SDS-FR-03 | Each valid source record must be normalized into a schema-compliant `sourceEvent` envelope. | Must |
 | SDS-FR-04 | Each datastore record must include stable session, machine, source, timestamp, and privacy metadata. | Must |
 | SDS-FR-05 | The importer must extract filtering facets for model usage, token usage, tool calls, subagent delegation, files, errors, and debug events when available. | Must |
@@ -88,6 +88,7 @@ or live visualization.
 
 - [x] Add local datastore workspace package.
 - [x] Read Copilot session metadata and source JSONL records.
+- [x] Read VS Code GitHub Copilot Chat debug events for IDE chat sessions.
 - [x] Normalize imported source records to `sourceEvent` envelopes.
 - [x] Apply local redaction by default.
 - [x] Add import and summary CLI commands.

@@ -14,6 +14,7 @@ Copilot already stores source data locally:
 
 1. Session metadata in `~/.copilot/session-store.db`.
 2. Source event streams in `~/.copilot/session-state/<session-id>/events.jsonl`.
+3. GitHub Copilot Chat debug logs in VS Code log directories for IDE chat sessions.
 
 Those records contain the raw material needed for filtering, analysis, model and
 token review, tool activity inspection, and eventual cross-machine aggregation.
@@ -39,6 +40,10 @@ The first source adapter reads Copilot session-store data directly:
 - `session-store.db` supplies session/repository/workspace context.
 - `session-state/*/events.jsonl` supplies source event chronology.
 - Hook registration is not required for this workflow.
+
+An additional VS Code source adapter imports GitHub Copilot Chat debug log lines
+as `source: "vscode"` records, so IDE chat sessions can be captured alongside
+CLI sessions in the same append-only datastore.
 
 ### 2) Durable Append-Only Datastore
 

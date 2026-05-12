@@ -31,11 +31,16 @@ describe("ingest-source-datastore args", () => {
       "a,b",
       "--machine-id",
       "machine-1",
+      "--vscode-chat-debug-path",
+      "./logs/GitHub Copilot Chat.log",
+      "--no-session-store",
       "--include-raw-payload"
     ]);
     expect(importArgs.command).toBe("import");
     expect(importArgs.ids).toEqual(["a", "b"]);
     expect(importArgs.machineId).toBe("machine-1");
+    expect(importArgs.includeSessionStore).toBe(false);
+    expect(importArgs.vscodeChatDebugPaths[0]).toContain("logs/GitHub Copilot Chat.log");
     expect(importArgs.includeRawPayload).toBe(true);
 
     const summaryArgs = parseArgs(["summary", "--datastore", "./datastore/events.jsonl"]);
@@ -147,5 +152,83 @@ describeIfSqlite("local source datastore import", () => {
     expect(summary.sessionCount).toBe(1);
     expect(summary.machineCount).toBe(1);
     expect(summary.sources).toEqual(["copilot-session-store"]);
+  });
+
+});
+
+describe("VS Code Copilot Chat debug import", () => {
+  let tempRoot = "";
+  let datastorePath = "";
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), "vscode-chat-datastore-test-"));
+    datastorePath = join(tempRoot, "datastore", "events.jsonl");
+  });
+
+  afterEach(() => {
+    if (tempRoot) {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("imports VS Code GitHub Copilot Chat debug logs without a CLI session store", async () => {
+    const logDir = join(tempRoot, "Code", "logs", "20260512T000000", "window1", "exthost");
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, "GitHub Copilot Chat.log");
+    writeFileSync(
+      logPath,
+      [
+        "[2026-05-12 05:40:00.000] [debug] Chat request started token=abc123",
+        "[2026-05-12 05:40:01.000] [info] Chat response complete"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const result = await importCopilotSessionStore({
+      dbPath: join(tempRoot, "missing-session-store.db"),
+      datastorePath,
+      includeSessionStore: false,
+      vscodeChatDebugPaths: [logDir],
+      machineId: "machine-1",
+      userId: "user-1",
+      includeRawPayload: true,
+      now: () => "2026-05-12T05:42:00.000Z"
+    });
+
+    expect(result.importedEvents).toBe(2);
+    expect(result.sessions[0]).toMatch(/^vscode-copilot-chat-/);
+
+    const lines = (await readFile(datastorePath, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(2);
+
+    const first = JSON.parse(lines[0]) as {
+      eventType: string;
+      source: string;
+      sourceVersion: string;
+      timestamp: string;
+      privacy: { locallyRedacted: boolean; rawPayloadOptIn: boolean };
+      payload: { sourceEventType: string; data: { level: string; message: string } };
+      facets: { debugEvents: Array<{ kind: string; message: string }> };
+      rawPayload?: { redacted: boolean; payload: { rawLine: string } };
+    };
+
+    expect(first.eventType).toBe("sourceEvent");
+    expect(first.source).toBe("vscode");
+    expect(first.sourceVersion).toBe("copilot-chat-debug-log-v1");
+    expect(first.timestamp).toBe("2026-05-12T05:40:00.000Z");
+    expect(first.privacy.locallyRedacted).toBe(true);
+    expect(first.privacy.rawPayloadOptIn).toBe(true);
+    expect(first.payload.sourceEventType).toBe("vscode.copilot-chat.debug");
+    expect(first.payload.data.level).toBe("debug");
+    expect(first.facets.debugEvents[0]).toMatchObject({
+      kind: "vscode.copilot-chat.debug",
+      message: "[debug] Chat request started [REDACTED_CREDENTIAL]"
+    });
+    expect(first.rawPayload?.redacted).toBe(true);
+    expect(JSON.stringify(first)).not.toContain("abc123");
+
+    const summary = await summarizeDatastore(datastorePath);
+    expect(summary.sources).toEqual(["vscode"]);
+    expect(summary.sessionCount).toBe(1);
   });
 });
