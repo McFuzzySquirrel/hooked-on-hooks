@@ -159,9 +159,16 @@ function vscodeSessionId(logPath: string, machineId: string): string {
 }
 
 function isVscodeCopilotChatLogPath(logPath: string): boolean {
-  const lower = basename(logPath).toLowerCase();
-  return lower.endsWith(".log")
-    && (lower.includes("github copilot chat") || lower.includes("copilot chat") || lower.includes("github.copilot-chat"));
+  const normalizedPath = logPath.replaceAll("\\", "/").toLowerCase();
+  const lowerBase = basename(logPath).toLowerCase();
+  if (!lowerBase.endsWith(".log")) {
+    return false;
+  }
+
+  return lowerBase.includes("github copilot chat")
+    || lowerBase.includes("copilot chat")
+    || lowerBase.includes("github.copilot-chat")
+    || normalizedPath.includes("/github.copilot-chat/");
 }
 
 async function discoverVscodeChatDebugFiles(paths: string[], depth = 0): Promise<string[]> {

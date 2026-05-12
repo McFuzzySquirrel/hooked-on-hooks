@@ -231,4 +231,37 @@ describe("VS Code Copilot Chat debug import", () => {
     expect(summary.sources).toEqual(["vscode"]);
     expect(summary.sessionCount).toBe(1);
   });
+
+  it("discovers Copilot Chat extension logs with generic file names", async () => {
+    const logsRoot = join(tempRoot, "Code", "logs");
+    const logDir = join(logsRoot, "20260512T000000", "window1", "exthost", "github.copilot-chat");
+    mkdirSync(logDir, { recursive: true });
+    const logPath = join(logDir, "renderer.log");
+    writeFileSync(
+      logPath,
+      "[2026-05-12 05:40:00.000] [debug] renderer debug line",
+      "utf8"
+    );
+
+    const result = await importCopilotSessionStore({
+      dbPath: join(tempRoot, "missing-session-store.db"),
+      datastorePath,
+      includeSessionStore: false,
+      vscodeChatDebugPaths: [logsRoot],
+      machineId: "machine-1",
+      userId: "user-1",
+      now: () => "2026-05-12T05:42:00.000Z"
+    });
+
+    expect(result.importedEvents).toBe(1);
+    const lines = (await readFile(datastorePath, "utf8")).trim().split("\n");
+    expect(lines).toHaveLength(1);
+    const first = JSON.parse(lines[0]) as {
+      source: string;
+      payload: { sourcePath: string; sourceEventType: string };
+    };
+    expect(first.source).toBe("vscode");
+    expect(first.payload.sourcePath.replaceAll("\\", "/")).toContain("/github.copilot-chat/renderer.log");
+    expect(first.payload.sourceEventType).toBe("vscode.copilot-chat.debug");
+  });
 });
