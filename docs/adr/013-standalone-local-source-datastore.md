@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-05-11
+- Amended: 2026-05-12 (VS Code workspaceStorage discovery + `.jsonl` debug source support)
 
 ## Context
 
@@ -14,7 +15,9 @@ Copilot already stores source data locally:
 
 1. Session metadata in `~/.copilot/session-store.db`.
 2. Source event streams in `~/.copilot/session-state/<session-id>/events.jsonl`.
-3. GitHub Copilot Chat debug logs in VS Code log directories for IDE chat sessions.
+3. GitHub Copilot Chat debug logs in VS Code `logs` directories and
+   `User/workspaceStorage/*/GitHub.copilot-chat/debug-logs` directories for
+   IDE chat sessions.
 
 Those records contain the raw material needed for filtering, analysis, model and
 token review, tool activity inspection, and eventual cross-machine aggregation.
@@ -45,6 +48,12 @@ An additional VS Code source adapter imports GitHub Copilot Chat debug log lines
 as `source: "vscode"` records, so IDE chat sessions can be captured alongside
 CLI sessions in the same append-only datastore.
 
+For this adapter, default discovery includes VS Code/Code-Insiders `logs` roots
+and `User/workspaceStorage` roots across supported platforms. The adapter
+accepts both `.log` and `.jsonl` debug files (including workspaceStorage
+`main.jsonl`) and still supports explicit import roots via
+`--vscode-chat-debug-path`.
+
 ### 2) Durable Append-Only Datastore
 
 Imported events are written to an append-only local JSONL datastore. The datastore
@@ -55,9 +64,10 @@ is designed to accumulate:
 - many machines
 - repeated imports from different local environments
 
-Each record uses the shared event envelope with `source: "copilot-session-store"`
-and `eventType: "sourceEvent"` so downstream filtering can operate on stable
-metadata and facets while preserving flexible source data.
+Each record uses the shared event envelope with `eventType: "sourceEvent"` and
+a stable source label (`source: "copilot-session-store"` for session-store
+imports, `source: "vscode"` for VS Code debug imports) so downstream filtering
+can operate on stable metadata and facets while preserving flexible source data.
 
 ### 3) Filtering Before Visualization
 
@@ -132,11 +142,14 @@ machines.
 ## Follow-Up Actions
 
 1. Add datastore filtering/query commands over normalized facets.
-2. Add import deduplication and optional compaction/indexing.
-3. Add additional source adapters if Copilot local storage shape evolves.
-4. Revisit live visualization once the datastore contains enough events for
+2. Expand summary/reporting with provenance-oriented breakdowns (for example
+   VS Code `logs` vs `workspaceStorage` path-pattern coverage) to detect source
+   drift and ingestion blind spots early.
+3. Add import deduplication and optional compaction/indexing.
+4. Add additional source adapters if Copilot local storage shape evolves.
+5. Revisit live visualization once the datastore contains enough events for
    replay, filtering, and cross-session analysis.
-5. Update public docs to route new users to the standalone datastore workflow
+6. Update public docs to route new users to the standalone datastore workflow
    before hook-based workflows.
 
 ## References

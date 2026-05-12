@@ -11,7 +11,7 @@ happened:
 
 - `~/.copilot/session-store.db` for session metadata
 - `~/.copilot/session-state/<session-id>/events.jsonl` for source events
-- VS Code GitHub Copilot Chat debug logs for IDE chat sessions
+- VS Code GitHub Copilot Chat debug logs from `logs` roots and `User/workspaceStorage/**/GitHub.copilot-chat/**/main.jsonl` for IDE chat sessions
 
 The standalone datastore pathway imports that data directly. It does not require:
 
@@ -61,7 +61,7 @@ VS Code Copilot Chat log file or directory and skip the session store:
 ```bash
 npm run datastore:import -- \
   --no-session-store \
-  --vscode-chat-debug-path ~/.config/Code/logs \
+  --vscode-chat-debug-path ~/.config/Code/User/workspaceStorage \
   --datastore ./datastore/events.jsonl
 ```
 
@@ -70,6 +70,16 @@ npm run datastore:import -- \
 ```bash
 npm run datastore:summary -- \
   --datastore ./datastore/events.jsonl
+```
+
+For provenance-oriented analysis, include verbose summary output to see VS Code
+path-pattern coverage (for example `logs` vs `workspaceStorage`) and top source
+paths by event volume:
+
+```bash
+npm run datastore:summary -- \
+  --datastore ./datastore/events.jsonl \
+  --verbose
 ```
 
 5. Import selected sessions only:

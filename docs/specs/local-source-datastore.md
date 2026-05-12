@@ -68,7 +68,7 @@ The first adapter reads:
 |--------|---------|
 | `session-store.db` | Session ID, repository/workspace context, timestamps |
 | `session-state/<session-id>/events.jsonl` | Source event chronology and source payloads |
-| VS Code `logs/**/GitHub Copilot Chat.log` | GitHub Copilot Chat debug events from IDE sessions |
+| VS Code `logs/**/*.log` and `User/workspaceStorage/**/GitHub.copilot-chat/**/*.jsonl` | GitHub Copilot Chat debug events from IDE sessions |
 
 The importer resolves the source JSONL path relative to the database directory:
 
@@ -86,11 +86,15 @@ npm run datastore:import -- \
 
 npm run datastore:import -- \
   --no-session-store \
-  --vscode-chat-debug-path ~/.config/Code/logs \
+  --vscode-chat-debug-path ~/.config/Code/User/workspaceStorage \
   --datastore ./datastore/events.jsonl
 
 npm run datastore:summary -- \
   --datastore ./datastore/events.jsonl
+
+npm run datastore:summary -- \
+  --datastore ./datastore/events.jsonl \
+  --verbose
 ```
 
 Use `--ids <session-a,session-b>` to import selected sessions. Use
@@ -107,8 +111,9 @@ can be grouped later.
 | `--machine-id <id>` | local hostname | Stable machine label for aggregation |
 | `--user-id <id>` | local username or `unknown` | Optional local user label |
 | `--include-raw-payload` | false | Store redacted raw source payload copy |
-| `--include-vscode-chat-debug` | false | Discover and import VS Code GitHub Copilot Chat logs from default locations |
+| `--include-vscode-chat-debug` | false | Discover and import VS Code GitHub Copilot Chat logs from default `logs` and `User/workspaceStorage` locations |
 | `--vscode-chat-debug-path <path>` | none | Import an explicit VS Code Copilot Chat log file or directory |
+| `--verbose` | false | Summary command: include VS Code path-pattern breakdown and top source paths |
 | `--no-session-store` | false | Skip `session-store.db` for IDE-only imports |
 | `--no-redact` | false | Disable default redaction for private local debugging |
 
@@ -121,7 +126,19 @@ The summary command reports:
 - session count and IDs
 - machine count and IDs
 - source count and names
+- per-source event totals (`sourceEventCounts`)
 - earliest and latest timestamps
+
+With `--verbose`, summary also reports `vscodePathBreakdown` with:
+
+- total VS Code event count
+- bucketed counts (`logs`, `workspaceStorage`, `other`, `missingSourcePath`)
+- top VS Code `payload.sourcePath` values by event volume
+
+The import command also reports `vscodeDebugImport` when VS Code debug scanning
+is enabled (default roots and/or explicit paths). This includes total discovered
+log files plus per-root counters for discovered files, imported events, and
+skipped lines.
 
 ## Privacy defaults
 

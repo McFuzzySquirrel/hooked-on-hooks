@@ -31,6 +31,16 @@ export interface DatastoreImportResult {
   importedEvents: number;
   skippedLines: number;
   sessions: string[];
+  vscodeDebugImport?: {
+    enabled: boolean;
+    discoveredFiles: number;
+    roots: Array<{
+      path: string;
+      discoveredFiles: number;
+      importedEvents: number;
+      skippedLines: number;
+    }>;
+  };
 }
 
 export interface DatastoreSummary {
@@ -42,8 +52,27 @@ export interface DatastoreSummary {
   sessions: string[];
   machines: string[];
   sources: string[];
+  sourceEventCounts: Record<string, number>;
   earliestTimestamp?: string;
   latestTimestamp?: string;
+  vscodePathBreakdown?: {
+    totalVscodeEvents: number;
+    buckets: {
+      logs: number;
+      workspaceStorage: number;
+      other: number;
+      missingSourcePath: number;
+    };
+    topSourcePaths: Array<{
+      path: string;
+      events: number;
+    }>;
+  };
+}
+
+export interface DatastoreSummaryOptions {
+  verbose?: boolean;
+  topSourcePathsLimit?: number;
 }
 
 interface SessionRow {
@@ -112,22 +141,37 @@ function sourceEventsPath(dbPath: string, sessionId: string): string {
 }
 
 function defaultVscodeChatDebugRoots(): string[] {
+  const override = process.env.VISUALIZER_VSCODE_DEBUG_ROOTS;
+  if (typeof override === "string" && override.trim().length > 0) {
+    return override
+      .split(process.platform === "win32" ? ";" : ":")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .map((entry) => resolve(entry));
+  }
+
   const home = homedir();
   const candidates = platform() === "win32"
     ? [
       process.env.APPDATA ? join(process.env.APPDATA, "Code", "logs") : undefined,
-      process.env.APPDATA ? join(process.env.APPDATA, "Code - Insiders", "logs") : undefined
+      process.env.APPDATA ? join(process.env.APPDATA, "Code - Insiders", "logs") : undefined,
+      process.env.APPDATA ? join(process.env.APPDATA, "Code", "User", "workspaceStorage") : undefined,
+      process.env.APPDATA ? join(process.env.APPDATA, "Code - Insiders", "User", "workspaceStorage") : undefined
     ]
     : platform() === "darwin"
       ? [
         join(home, "Library", "Application Support", "Code", "logs"),
-        join(home, "Library", "Application Support", "Code - Insiders", "logs")
+        join(home, "Library", "Application Support", "Code - Insiders", "logs"),
+        join(home, "Library", "Application Support", "Code", "User", "workspaceStorage"),
+        join(home, "Library", "Application Support", "Code - Insiders", "User", "workspaceStorage")
       ]
       : [
         join(home, ".config", "Code", "logs"),
         join(home, ".config", "Code - Insiders", "logs"),
         join(home, ".vscode-server", "data", "logs"),
-        join(home, ".vscode-server-insiders", "data", "logs")
+        join(home, ".vscode-server-insiders", "data", "logs"),
+        join(home, ".config", "Code", "User", "workspaceStorage"),
+        join(home, ".config", "Code - Insiders", "User", "workspaceStorage")
       ];
 
   return candidates.filter((candidate): candidate is string => Boolean(candidate));
@@ -159,9 +203,45 @@ function vscodeSessionId(logPath: string, machineId: string): string {
 }
 
 function isVscodeCopilotChatLogPath(logPath: string): boolean {
-  const lower = basename(logPath).toLowerCase();
-  return lower.endsWith(".log")
-    && (lower.includes("github copilot chat") || lower.includes("copilot chat") || lower.includes("github.copilot-chat"));
+  const normalizedPath = logPath.replaceAll("\\", "/").toLowerCase();
+  const lowerBase = basename(logPath).toLowerCase();
+  if (!lowerBase.endsWith(".log") && !lowerBase.endsWith(".jsonl")) {
+    return false;
+  }
+
+  return lowerBase.includes("github copilot chat")
+    || lowerBase.includes("copilot chat")
+    || lowerBase.includes("github.copilot-chat")
+    || normalizedPath.includes("/github.copilot-chat/");
+}
+
+function normalizeRootPath(rootPath: string): string {
+  return resolve(rootPath).replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+function rootForFile(filePath: string, roots: string[]): string {
+  const normalizedFile = normalizeRootPath(filePath);
+  let bestMatch: string | undefined;
+  for (const root of roots) {
+    const normalizedRoot = normalizeRootPath(root);
+    if (normalizedFile === normalizedRoot || normalizedFile.startsWith(`${normalizedRoot}/`)) {
+      if (!bestMatch || normalizedRoot.length > bestMatch.length) {
+        bestMatch = normalizedRoot;
+      }
+    }
+  }
+  return bestMatch ?? "(unmatched)";
+}
+
+function classifyVscodeSourcePath(sourcePath: string): "logs" | "workspaceStorage" | "other" {
+  const normalizedPath = sourcePath.replaceAll("\\", "/").toLowerCase();
+  if (normalizedPath.includes("/user/workspacestorage/") && normalizedPath.includes("/github.copilot-chat/")) {
+    return "workspaceStorage";
+  }
+  if (normalizedPath.includes("/logs/")) {
+    return "logs";
+  }
+  return "other";
 }
 
 async function discoverVscodeChatDebugFiles(paths: string[], depth = 0): Promise<string[]> {
@@ -420,8 +500,31 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
     ...explicitVscodePaths,
     ...(options.includeDefaultVscodeChatDebug ? defaultVscodeChatDebugRoots() : [])
   ];
+  const normalizedRoots = [...new Set(vscodePaths.map((rootPath) => normalizeRootPath(rootPath)))];
+  const vscodeDebugEnabled = normalizedRoots.length > 0 || (options.includeDefaultVscodeChatDebug ?? false);
+  const rootStats = new Map<string, { discoveredFiles: number; importedEvents: number; skippedLines: number }>();
+  for (const rootPath of normalizedRoots) {
+    rootStats.set(rootPath, {
+      discoveredFiles: 0,
+      importedEvents: 0,
+      skippedLines: 0
+    });
+  }
   const vscodeFiles = await discoverVscodeChatDebugFiles(vscodePaths);
   for (const logPath of vscodeFiles) {
+    const matchedRoot = rootForFile(logPath, normalizedRoots);
+    if (!rootStats.has(matchedRoot)) {
+      rootStats.set(matchedRoot, {
+        discoveredFiles: 0,
+        importedEvents: 0,
+        skippedLines: 0
+      });
+    }
+    const matchedStats = rootStats.get(matchedRoot);
+    if (matchedStats) {
+      matchedStats.discoveredFiles += 1;
+    }
+
     const sessionId = vscodeSessionId(logPath, machineId);
     importedSessions.add(sessionId);
     const lines = (await readFile(logPath, "utf8"))
@@ -440,10 +543,16 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
       });
       if (!event) {
         skippedLines += 1;
+        if (matchedStats) {
+          matchedStats.skippedLines += 1;
+        }
         continue;
       }
       await appendFile(options.datastorePath, `${JSON.stringify(event)}\n`, "utf8");
       importedEvents += 1;
+      if (matchedStats) {
+        matchedStats.importedEvents += 1;
+      }
     }
   }
 
@@ -451,14 +560,36 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
     datastorePath: options.datastorePath,
     importedEvents,
     skippedLines,
-    sessions: [...importedSessions].sort()
+    sessions: [...importedSessions].sort(),
+    vscodeDebugImport: vscodeDebugEnabled
+      ? {
+        enabled: vscodeDebugEnabled,
+        discoveredFiles: vscodeFiles.length,
+        roots: [...rootStats.entries()]
+          .map(([path, stats]) => ({
+            path,
+            ...stats
+          }))
+          .sort((a, b) => a.path.localeCompare(b.path))
+      }
+      : undefined
   };
 }
 
-export async function summarizeDatastore(datastorePath: string): Promise<DatastoreSummary> {
+export async function summarizeDatastore(datastorePath: string, options: DatastoreSummaryOptions = {}): Promise<DatastoreSummary> {
+  const verbose = options.verbose ?? false;
+  const topSourcePathsLimit = options.topSourcePathsLimit ?? 20;
   const sessions = new Set<string>();
   const machines = new Set<string>();
   const sources = new Set<string>();
+  const sourceEventCounts = new Map<string, number>();
+  const vscodeBuckets = {
+    logs: 0,
+    workspaceStorage: 0,
+    other: 0,
+    missingSourcePath: 0
+  };
+  const vscodeSourcePathCounts = new Map<string, number>();
   let eventCount = 0;
   let earliestTimestamp: string | undefined;
   let latestTimestamp: string | undefined;
@@ -472,7 +603,8 @@ export async function summarizeDatastore(datastorePath: string): Promise<Datasto
       sourceCount: 0,
       sessions: [],
       machines: [],
-      sources: []
+      sources: [],
+      sourceEventCounts: {}
     };
   }
 
@@ -495,6 +627,20 @@ export async function summarizeDatastore(datastorePath: string): Promise<Datasto
     sessions.add(parsed.value.sessionId);
     machines.add(parsed.value.machineId);
     sources.add(parsed.value.source);
+    sourceEventCounts.set(
+      parsed.value.source,
+      (sourceEventCounts.get(parsed.value.source) ?? 0) + 1
+    );
+    if (verbose && parsed.value.source === "vscode") {
+      const sourcePath = safeString(asRecord(parsed.value.payload).sourcePath, "");
+      if (sourcePath.length === 0) {
+        vscodeBuckets.missingSourcePath += 1;
+      } else {
+        const bucket = classifyVscodeSourcePath(sourcePath);
+        vscodeBuckets[bucket] += 1;
+        vscodeSourcePathCounts.set(sourcePath, (vscodeSourcePathCounts.get(sourcePath) ?? 0) + 1);
+      }
+    }
     if (!earliestTimestamp || parsed.value.timestamp < earliestTimestamp) {
       earliestTimestamp = parsed.value.timestamp;
     }
@@ -512,6 +658,17 @@ export async function summarizeDatastore(datastorePath: string): Promise<Datasto
     sessions: [...sessions].sort(),
     machines: [...machines].sort(),
     sources: [...sources].sort(),
+    sourceEventCounts: Object.fromEntries([...sourceEventCounts.entries()].sort(([a], [b]) => a.localeCompare(b))),
+    vscodePathBreakdown: verbose
+      ? {
+        totalVscodeEvents: sourceEventCounts.get("vscode") ?? 0,
+        buckets: vscodeBuckets,
+        topSourcePaths: [...vscodeSourcePathCounts.entries()]
+          .map(([path, events]) => ({ path, events }))
+          .sort((a, b) => b.events - a.events || a.path.localeCompare(b.path))
+          .slice(0, topSourcePathsLimit)
+      }
+      : undefined,
     earliestTimestamp,
     latestTimestamp
   };

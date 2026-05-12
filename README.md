@@ -70,10 +70,13 @@ npm run datastore:import -- --db-path ~/.copilot/session-store.db --datastore ./
 # Also include VS Code GitHub Copilot Chat debug logs
 npm run datastore:import -- --db-path ~/.copilot/session-store.db --datastore ./datastore/events.jsonl --include-vscode-chat-debug
 
-# IDE-only import (no Copilot CLI session store required)
-npm run datastore:import -- --no-session-store --vscode-chat-debug-path ~/.config/Code/logs --datastore ./datastore/events.jsonl
+# IDE-only import (no Copilot CLI session store required; scans Copilot Chat debug .jsonl/.log files)
+npm run datastore:import -- --no-session-store --vscode-chat-debug-path ~/.config/Code/User/workspaceStorage --datastore ./datastore/events.jsonl
 
 npm run datastore:summary -- --datastore ./datastore/events.jsonl
+
+# Provenance-oriented summary (VS Code logs vs workspaceStorage buckets)
+npm run datastore:summary -- --datastore ./datastore/events.jsonl --verbose
 ```
 
 ## Project Structure
