@@ -3,6 +3,7 @@
 - Status: Accepted
 - Date: 2026-05-11
 - Amended: 2026-05-12 (VS Code workspaceStorage discovery + `.jsonl` debug source support)
+- Extracted: 2026-05-13 (implementation moved to [`copilot-trace-importer`](https://github.com/McFuzzySquirrel/copilot-trace-importer))
 
 ## Context
 
