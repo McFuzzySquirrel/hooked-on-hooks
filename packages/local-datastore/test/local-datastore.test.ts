@@ -45,7 +45,7 @@ describe("ingest-source-datastore args", () => {
 
     const summaryArgs = parseArgs(["summary", "--datastore", "./datastore/events.jsonl"]);
     expect(summaryArgs.command).toBe("summary");
-    expect(summaryArgs.datastorePath).toContain("datastore/events.jsonl");
+    expect(summaryArgs.datastorePath.replaceAll("\\", "/")).toContain("datastore/events.jsonl");
   });
 });
 
