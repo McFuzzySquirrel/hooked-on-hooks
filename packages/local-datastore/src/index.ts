@@ -492,6 +492,7 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
     ...(options.includeDefaultVscodeChatDebug ? defaultVscodeChatDebugRoots() : [])
   ];
   const normalizedRoots = [...new Set(vscodePaths.map((rootPath) => normalizeRootPath(rootPath)))];
+  const vscodeDebugEnabled = normalizedRoots.length > 0 || (options.includeDefaultVscodeChatDebug ?? false);
   const rootStats = new Map<string, { discoveredFiles: number; importedEvents: number; skippedLines: number }>();
   for (const rootPath of normalizedRoots) {
     rootStats.set(rootPath, {
@@ -551,9 +552,9 @@ export async function importCopilotSessionStore(options: CopilotSessionStoreImpo
     importedEvents,
     skippedLines,
     sessions: [...importedSessions].sort(),
-    vscodeDebugImport: normalizedRoots.length > 0 || options.includeDefaultVscodeChatDebug
+    vscodeDebugImport: vscodeDebugEnabled
       ? {
-        enabled: normalizedRoots.length > 0 || options.includeDefaultVscodeChatDebug,
+        enabled: vscodeDebugEnabled,
         discoveredFiles: vscodeFiles.length,
         roots: [...rootStats.entries()]
           .map(([path, stats]) => ({
