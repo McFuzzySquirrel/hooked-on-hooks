@@ -141,6 +141,15 @@ function sourceEventsPath(dbPath: string, sessionId: string): string {
 }
 
 function defaultVscodeChatDebugRoots(): string[] {
+  const override = process.env.VISUALIZER_VSCODE_DEBUG_ROOTS;
+  if (typeof override === "string" && override.trim().length > 0) {
+    return override
+      .split(process.platform === "win32" ? ";" : ":")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0)
+      .map((entry) => resolve(entry));
+  }
+
   const home = homedir();
   const candidates = platform() === "win32"
     ? [

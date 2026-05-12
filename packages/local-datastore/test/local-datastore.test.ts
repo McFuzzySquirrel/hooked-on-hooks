@@ -315,13 +315,12 @@ describe("VS Code Copilot Chat debug import", () => {
   });
 
   it("auto-discovers workspaceStorage logs from default roots with includeDefaultVscodeChatDebug", async () => {
-    const originalHome = process.env.HOME;
-    process.env.HOME = tempRoot;
+    const originalRootsOverride = process.env.VISUALIZER_VSCODE_DEBUG_ROOTS;
     try {
+      const overrideRoot = join(tempRoot, "default-roots");
+      process.env.VISUALIZER_VSCODE_DEBUG_ROOTS = overrideRoot;
       const logDir = join(
-        tempRoot,
-        ".config",
-        "Code",
+        overrideRoot,
         "User",
         "workspaceStorage",
         "workspace-xyz789",
@@ -365,7 +364,7 @@ describe("VS Code Copilot Chat debug import", () => {
       expect(secondRun.sessions).toHaveLength(1);
       expect(firstRun.sessions[0]).toBe(secondRun.sessions[0]);
     } finally {
-      process.env.HOME = originalHome;
+      process.env.VISUALIZER_VSCODE_DEBUG_ROOTS = originalRootsOverride;
     }
   });
 
