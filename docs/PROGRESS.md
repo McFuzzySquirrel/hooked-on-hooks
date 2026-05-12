@@ -4,8 +4,8 @@
 
 **Mode**: Feature-Based Build  
 **Product Vision**: docs/product-vision.md  
-**Status**: Complete (MVP + post-MVP enhancements) + static dashboard migration + standalone datastore direction  
-**Last Updated**: 2026-05-11
+**Status**: Complete (MVP + post-MVP enhancements) + static dashboard migration + standalone datastore direction (CLI + VS Code Copilot Chat)  
+**Last Updated**: 2026-05-12
 
 All five planned MVP features are complete and validated locally. Post-MVP work includes integration tooling (bootstrap/unbootstrap), live board UI polish, tracing v2 (event-stream correlation), and operator UX/learning-surface updates captured in the dedicated post-MVP feature document.
 
@@ -18,8 +18,10 @@ Static session dashboard migration has started on branch `feat/staic-session-dat
 Standalone datastore work now establishes a no-hooks source ingestion path:
 
 - `datastore:import` reads local Copilot session-store metadata and source JSONL
+- `datastore:import --include-vscode-chat-debug` also imports VS Code GitHub Copilot Chat debug logs for IDE chat sessions
+- `datastore:import --no-session-store --vscode-chat-debug-path <path>` supports IDE-only imports without Copilot CLI
 - `datastore:summary` reports datastore event/session/machine/source scope
-- `sourceEvent` schema records preserve source data with filtering facets
+- `sourceEvent` schema records preserve source data with filtering facets; VS Code records use `source: "vscode"` and populate `debugEvents` facets
 - Documentation suite added for ADR, feature, spec, and operator pathway
 
 ## Tracing v2: Event-Stream Correlation (Post-MVP)
@@ -188,22 +190,25 @@ Standalone datastore work now establishes a no-hooks source ingestion path:
 ### Current Test Summary
 
 ```
-✓ packages/hook-emitter/test/emitter.test.ts           (4 tests)
-✓ packages/web-ui/test/replay.test.ts                  (8 tests)
-✓ packages/ingest-service/test/ingest.test.ts          (9 tests)
-✓ shared/redaction/test/redaction.test.ts             (37 tests)
-✓ shared/event-schema/test/schema.test.ts              (5 tests)
-✓ shared/state-machine/test/state-machine.test.ts     (36 tests)
-✓ shared/state-machine/test/queries.test.ts           (18 tests)
-✓ packages/web-ui/test/stateMapping.test.ts           (17 tests)
-✓ packages/web-ui/test/filterState.test.ts            (15 tests)
-✓ packages/web-ui/test/ganttData.test.ts              (22 tests)
-✓ scripts/test/bootstrap.test.ts                      (15 tests)
-✓ scripts/test/unbootstrap.test.ts                     (7 tests)
-✓ packages/web-ui/test/queries-analytics.test.ts      (13 tests)
-Test Files  15 passed (15)
-      Tests  277 passed (277)
-Coverage: lines ≥80% (all thresholds pass); reducer 96.29%
+✓ packages/hook-emitter/test/emitter.test.ts                    (6 tests)
+✓ packages/web-ui/test/replay.test.ts                           (7 tests)
+✓ packages/ingest-service/test/ingest.test.ts                  (11 tests)
+✓ shared/redaction/test/redaction.test.ts                      (38 tests)
+✓ shared/event-schema/test/schema.test.ts                       (9 tests)
+✓ shared/state-machine/test/state-machine.test.ts              (36 tests)
+✓ shared/state-machine/test/queries.test.ts                    (13 tests)
+✓ packages/web-ui/test/stateMapping.test.ts                    (19 tests)
+✓ packages/web-ui/test/filterState.test.ts                     (15 tests)
+✓ packages/web-ui/test/ganttData.test.ts                       (29 tests)
+✓ packages/web-ui/test/csvExport.test.ts                       (22 tests)
+✓ packages/web-ui/test/session-dashboard-helpers.test.ts        (7 tests)
+✓ packages/local-datastore/test/local-datastore.test.ts         (3 tests)
+✓ scripts/test/bootstrap.test.ts                               (48 tests)
+✓ scripts/test/unbootstrap.test.ts                             (20 tests)
+✓ scripts/test/export-session-store.test.ts                     (4 tests)
+Test Files  16 passed (16)
+      Tests  287 passed (287)
+Coverage: lines ≥80% (all thresholds pass)
 ```
 
 ## Feature Progress
