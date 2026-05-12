@@ -239,8 +239,7 @@ describe("VS Code Copilot Chat debug import", () => {
     const logPath = join(logDir, "renderer.log");
     writeFileSync(
       logPath,
-      "[2026-05-12 05:40:00.000] [debug] renderer debug line",
-      "utf8"
+      "[2026-05-12 05:40:00.000] [debug] renderer debug line", "utf8"
     );
 
     const result = await importCopilotSessionStore({
